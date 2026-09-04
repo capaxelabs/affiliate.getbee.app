@@ -200,10 +200,10 @@ curl -s "https://partners.shopify.com/<partner-id>/api/unstable/graphql.json" \
 Connecting an account discovers your apps automatically. Use **Sync apps from
 Shopify** on the Apps page to pick up new ones; the hourly sync does it too.
 
-> The Partner API has no field that lists an organization's apps, so apps are
-> derived from billing transactions. **An app with no transactions yet cannot be
-> discovered** — add those with **Add manually**, giving the app's
-> `gid://partners/App/...` id so the sync can match it later.
+> The Partner API has no field that lists an organization's apps, so discovery
+> derives them from billing transactions — an app that has never billed anyone is
+> invisible to it. Those apps register themselves the first time they post an
+> install webhook (see below), so in practice you rarely add one by hand.
 
 Add several accounts if your apps live under different organizations.
 
@@ -269,6 +269,30 @@ await report('/api/track/uninstall', {
 
 `app` is the slug shown in the Apps table.
 
+### Apps can register themselves
+
+Include `appName` and an app we have never seen is created on the spot, so a new
+app does not need adding by hand and starts collecting merchants from its very
+first install:
+
+```js
+await report('/api/track/install', {
+  app: 'rankflo',                              // becomes the slug
+  appName: 'RankFlo',                          // required only to register
+  partnerId: '3975838',                        // optional, links it to an account
+  partnerAppId: 'gid://partners/App/292818255873', // optional, matches revenue sooner
+  shopDomain,
+  shop: { /* ... */ }
+});
+```
+
+Registered apps arrive with **Affiliate off**, same as discovered ones. Without
+`appName` an unknown slug is rejected, so a typo cannot litter the app list.
+
+If the app later bills someone, the Partner sync **adopts** the existing record
+by name rather than creating a duplicate, filling in the Partner app id it now
+knows. Passing `partnerAppId` up front skips the guesswork.
+
 ### What comes from where
 
 | | Partner API (automatic) | Your app posting here |
@@ -278,6 +302,7 @@ await report('/api/track/uninstall', {
 | Shop name | yes | yes |
 | Churn reason | yes, Shopify's own picker | yes, plus free-text feedback |
 | **Merchant email** | **no** | yes |
+| Registering an app that has never billed anyone | no | yes |
 | Owner name, phone, country, currency, timezone, plan | no | yes |
 | Affiliate attribution (`ref`) | no | yes |
 

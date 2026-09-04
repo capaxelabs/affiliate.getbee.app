@@ -121,7 +121,7 @@ export const apps = sqliteTable(
 			.notNull()
 			.default(false),
 		/** Where the record came from. */
-		source: text('source', { enum: ['partner_api', 'manual'] })
+		source: text('source', { enum: ['partner_api', 'webhook', 'manual'] })
 			.notNull()
 			.default('manual'),
 		/** Which Partner organization this app lives under. */

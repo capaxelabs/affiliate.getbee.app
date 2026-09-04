@@ -121,6 +121,12 @@ Discovery only ever writes `name`, `partnerAppId` and `partnerAccountId`; the
 fields an admin owns (`slug`, `listingUrl`, commission, `affiliateEnabled`) are
 never overwritten.
 
+Apps also register themselves: `/api/track/install` with an `appName` creates the
+record via `findOrRegisterApp`. That covers apps with no billing history, which
+discovery cannot see. Such a row has no `partnerAppId`, so `syncApps` first tries
+`findAdoptableApp` — a name match with a null Partner app id — and adopts it
+rather than inserting a duplicate. Do not remove that step.
+
 **The Partner API cannot list an organization's apps.** `QueryRoot` exposes only
 `app(id:)`, `transactions`, `events`, `transaction` and `activeSubscription`, and
 the org-wide `Relationship` event carries no app reference. `discoverApps`

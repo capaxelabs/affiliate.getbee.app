@@ -8,6 +8,7 @@ import {
 	normalizeShopDomain
 } from '$lib/server/services/referral';
 import { recordInstall } from '$lib/server/services/merchant';
+import { findOrRegisterApp } from '$lib/server/services/app-registry';
 import { readSignedBody } from '$lib/server/ingest';
 import type { RequestHandler } from './$types';
 
@@ -27,6 +28,9 @@ import type { RequestHandler } from './$types';
  *     "app": "kaching-bundles",
  *     "shopDomain": "acme.myshopify.com",
  *     "ref": "K7QP2M4X",                       // optional
+ *     "appName": "RankFlo",                    // registers the app if unknown
+ *     "partnerId": "3975838",                  // optional, links it to an account
+ *     "partnerAppId": "gid://partners/App/1",  // optional, matches revenue sooner
  *     "installedAt": "2026-09-04T10:00:00Z",   // optional
  *     "plan": "pro",                            // optional
  *     "shop": {                                 // optional, all fields optional
@@ -38,6 +42,13 @@ import type { RequestHandler } from './$types';
  */
 const bodySchema = z.object({
 	app: z.string().min(1),
+	/** Supply to let an app we have never seen register itself. */
+	appName: z.string().trim().min(2).max(120).optional(),
+	/** Shopify Partner organization id, so a new app lands under the right account. */
+	partnerId: z.string().trim().max(40).optional(),
+	/** gid://partners/App/... when the app knows it. Lets revenue match sooner. */
+	partnerAppId: z.string().trim().max(120).optional(),
+	listingUrl: z.string().trim().url().optional(),
 	shopDomain: z.string().min(1),
 	ref: z.string().min(4).max(24).optional().nullable(),
 	installedAt: z.string().datetime().optional().nullable(),
@@ -70,8 +81,26 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 	const shopDomain = normalizeShopDomain(payload.shopDomain);
 	if (!shopDomain) return json({ error: 'Invalid shop domain.' }, { status: 400 });
 
-	const [app] = await locals.db.select().from(apps).where(eq(apps.slug, payload.app)).limit(1);
-	if (!app) return json({ error: `Unknown app "${payload.app}".` }, { status: 404 });
+	// Registers the app when it is new, so an app with no billing history — which
+	// the Partner API cannot reveal — still gets on the books.
+	const registered = await findOrRegisterApp(locals.db, {
+		slug: payload.app,
+		name: payload.appName ?? '',
+		partnerId: payload.partnerId,
+		partnerAppId: payload.partnerAppId,
+		listingUrl: payload.listingUrl
+	});
+
+	if (!registered) {
+		return json(
+			{
+				error: `Unknown app "${payload.app}". Include "appName" to register it.`
+			},
+			{ status: 404 }
+		);
+	}
+
+	const { app, created: appCreated } = registered;
 
 	const installedAt = payload.installedAt ? new Date(payload.installedAt) : new Date();
 
@@ -131,6 +160,9 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 	});
 
 	return json({
+		appRegistered: appCreated,
+		appId: app.id,
+		appSlug: app.slug,
 		recorded: Boolean(install),
 		merchantId: install?.merchantId ?? null,
 		installId: install?.installId ?? null,

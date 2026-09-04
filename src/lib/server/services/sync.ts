@@ -12,6 +12,7 @@ import { recordCommission, releaseMaturedCommissions } from './commission';
 import { normalizeShopDomain } from './referral';
 import { recordInstall, recordUninstall, upsertMerchant } from './merchant';
 import { findListing } from './listing';
+import { findAdoptableApp, uniqueSlug } from './app-registry';
 import {
 	chargeTypeFor,
 	discoverApps,
@@ -55,32 +56,6 @@ async function credentialsFor(env: Env, account: Account): Promise<PartnerCreden
 	};
 }
 
-/** "Kaching Bundles & Upsells" -> "kaching-bundles-upsells" */
-function slugify(name: string) {
-	return (
-		name
-			.toLowerCase()
-			.replace(/[^a-z0-9]+/g, '-')
-			.replace(/^-+|-+$/g, '')
-			.slice(0, 50) || 'app'
-	);
-}
-
-/** Picks a slug that is not taken yet. */
-async function uniqueSlug(db: DrizzleClient, name: string) {
-	const base = slugify(name);
-	for (let i = 0; i < 20; i++) {
-		const candidate = i === 0 ? base : `${base}-${i + 1}`;
-		const [clash] = await db
-			.select({ id: apps.id })
-			.from(apps)
-			.where(eq(apps.slug, candidate))
-			.limit(1);
-		if (!clash) return candidate;
-	}
-	return `${base}-${Math.floor(Date.now() / 1000)}`;
-}
-
 export type AppSyncSummary = {
 	partnerAccountId: string;
 	partnerAccountName: string;
@@ -118,11 +93,30 @@ export async function syncApps(
 
 		{
 			for (const partnerApp of discovered) {
-				const [existing] = await db
+				let [existing] = await db
 					.select()
 					.from(apps)
 					.where(eq(apps.partnerAppId, partnerApp.id))
 					.limit(1);
+
+				// An app registered by its own install webhook has no Partner app id
+				// yet. Adopt it by name rather than creating a second record.
+				if (!existing) {
+					const adoptable = await findAdoptableApp(db, partnerApp.name);
+					if (adoptable) {
+						const [adopted] = await db
+							.update(apps)
+							.set({
+								partnerAppId: partnerApp.id,
+								partnerAccountId: account.id,
+								updatedAt: new Date()
+							})
+							.where(eq(apps.id, adoptable.id))
+							.returning();
+						existing = adopted;
+						updated++;
+					}
+				}
 
 				if (existing) {
 					if (!existing.listingUrl || !existing.iconUrl) {
