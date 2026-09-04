@@ -1,6 +1,6 @@
 {
 	"$schema": "./node_modules/wrangler/config-schema.json",
-	"name": "affiliate-getbee-apps",
+	"name": "affiliate-getbee-app",
 	"account_id": "81cac75fe318d80f4344481afc4799ac",
 	"compatibility_date": "2026-01-10",
 	"compatibility_flags": [
