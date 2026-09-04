@@ -20,10 +20,20 @@ export const GET: RequestHandler = async (event) => {
 		.select({ affiliate: affiliates, app: apps })
 		.from(affiliates)
 		.innerJoin(apps, eq(apps.slug, params.app))
-		.where(and(eq(affiliates.refCode, refCode), eq(apps.status, 'active')))
+		.where(
+			and(
+				eq(affiliates.refCode, refCode),
+				eq(apps.status, 'active'),
+				eq(apps.affiliateEnabled, true)
+			)
+		)
 		.limit(1);
 
 	if (!row) error(404, 'That affiliate link is not valid.');
+
+	// Opting an app in requires a listing URL, so this should not happen — but a
+	// link with nowhere to send the merchant is worth failing loudly.
+	if (!row.app.listingUrl) error(404, 'That app has no App Store listing yet.');
 
 	// Suspended and rejected affiliates stop earning, but the merchant still
 	// reaches the listing rather than hitting a dead link.

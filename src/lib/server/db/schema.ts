@@ -107,7 +107,23 @@ export const apps = sqliteTable(
 		slug: text('slug').notNull(),
 		name: text('name').notNull(),
 		iconUrl: text('icon_url'),
-		listingUrl: text('listing_url').notNull(),
+		/**
+		 * Needed only to build affiliate links, so it stays empty for apps
+		 * discovered from the Partner API until someone opts them in.
+		 */
+		listingUrl: text('listing_url'),
+		/**
+		 * Whether this app is offered to affiliates. Discovery brings in every app
+		 * for revenue and merchant analytics; only opted-in apps get links,
+		 * referrals and commissions.
+		 */
+		affiliateEnabled: integer('affiliate_enabled', { mode: 'boolean' })
+			.notNull()
+			.default(false),
+		/** Where the record came from. */
+		source: text('source', { enum: ['partner_api', 'manual'] })
+			.notNull()
+			.default('manual'),
 		/** Which Partner organization this app lives under. */
 		partnerAccountId: text('partner_account_id').references(() => partnerAccounts.id, {
 			onDelete: 'set null'

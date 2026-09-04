@@ -14,6 +14,9 @@
 	import StatusBadge from '$lib/components/status-badge.svelte';
 	import PackageIcon from '@lucide/svelte/icons/package';
 	import PlusIcon from '@lucide/svelte/icons/plus';
+	import DownloadIcon from '@lucide/svelte/icons/cloud-download';
+	import LoaderIcon from '@lucide/svelte/icons/loader-circle';
+	import CheckIcon from '@lucide/svelte/icons/check';
 	import { money, commissionLabel } from '$lib/format';
 	import type { ActionData, PageData } from './$types';
 
@@ -60,6 +63,18 @@
 		await update();
 	};
 
+	let busy = $state(false);
+
+	const discovering = () => {
+		busy = true;
+		return async ({ result, update }: any) => {
+			busy = false;
+			if (result.type === 'success') toast.success(result.data?.message ?? 'Done.');
+			if (result.type === 'failure') toast.error(result.data?.error ?? 'Could not reach Shopify.');
+			await update();
+		};
+	};
+
 	const toggle = () => async ({ result, update }: any) => {
 		if (result.type === 'success') toast.success(result.data?.message ?? 'Updated.');
 		if (result.type === 'failure') toast.error(result.data?.error ?? 'Could not update.');
@@ -69,10 +84,25 @@
 
 <svelte:head><title>Apps · Admin</title></svelte:head>
 
-<PageHeader title="Apps" description="The Shopify apps affiliates can promote.">
+<PageHeader
+	title="Apps"
+	description="Every app in your Partner accounts. Revenue and merchants are tracked for all of them; switch on Affiliate for the ones you want promoted."
+>
 	{#snippet actions()}
 		{#if data.canWrite}
-			<Button onclick={openCreate}><PlusIcon class="size-4" /> Add app</Button>
+			{#if data.canDiscover}
+				<form method="POST" action="?/discover" use:enhance={discovering}>
+					<Button type="submit" variant="outline" disabled={busy}>
+						{#if busy}
+							<LoaderIcon class="size-4 animate-spin" />
+						{:else}
+							<DownloadIcon class="size-4" />
+						{/if}
+						Sync apps from Shopify
+					</Button>
+				</form>
+			{/if}
+			<Button onclick={openCreate}><PlusIcon class="size-4" /> Add manually</Button>
 		{/if}
 	{/snippet}
 </PageHeader>
@@ -100,11 +130,19 @@
 			<EmptyState
 				icon={PackageIcon}
 				title="No apps yet"
-				description="Add your first Shopify app so affiliates have something to promote."
+				description={data.canDiscover
+					? 'Sync from Shopify to pull in every app on your Partner accounts.'
+					: 'Connect a Partner account first, then sync your apps.'}
 			>
 				{#snippet action()}
 					{#if data.canWrite}
-						<Button onclick={openCreate}>Add app</Button>
+						{#if data.canDiscover}
+							<form method="POST" action="?/discover" use:enhance={discovering}>
+								<Button type="submit" disabled={busy}>Sync apps from Shopify</Button>
+							</form>
+						{:else}
+							<Button href="/admin/partners">Connect a Partner account</Button>
+						{/if}
 					{/if}
 				{/snippet}
 			</EmptyState>
@@ -115,8 +153,8 @@
 					<Table.Row>
 						<Table.Head>App</Table.Head>
 						<Table.Head>Slug</Table.Head>
+						<Table.Head>Affiliate</Table.Head>
 						<Table.Head>Commission</Table.Head>
-						<Table.Head>Cookie</Table.Head>
 						<Table.Head>Status</Table.Head>
 						<Table.Head class="text-right">Installs</Table.Head>
 						<Table.Head class="text-right">This month</Table.Head>
@@ -142,19 +180,55 @@
 									{/if}
 									<div class="min-w-0">
 										<p class="font-medium">{app.name}</p>
-										{#if !app.partnerAccountId}
-											<p class="text-xs text-amber-600">No partner account — sync will skip it</p>
-										{:else if !app.partnerAppId}
+										{#if !app.partnerAppId}
 											<p class="text-xs text-amber-600">No Partner app id — sync will skip it</p>
+										{:else if !app.partnerAccountId}
+											<p class="text-xs text-amber-600">No partner account — sync will skip it</p>
+										{:else if !app.listingUrl}
+											<p class="text-xs text-muted-foreground">
+												Add a listing URL to offer it to affiliates
+											</p>
 										{/if}
 									</div>
 								</div>
 							</Table.Cell>
 							<Table.Cell class="font-mono text-xs text-muted-foreground">{app.slug}</Table.Cell>
-							<Table.Cell class="text-muted-foreground">
-								{commissionLabel(app.commissionBps, app.commissionMonths)}
+							<Table.Cell>
+								{#if data.canWrite}
+									<form method="POST" action="?/toggleAffiliate" use:enhance={toggle}>
+										<input type="hidden" name="id" value={app.id} />
+										<Button
+											type="submit"
+											size="sm"
+											variant={app.affiliateEnabled ? 'secondary' : 'ghost'}
+											class={app.affiliateEnabled
+												? 'gap-1.5 border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+												: 'gap-1.5 text-muted-foreground'}
+											title={app.listingUrl
+												? undefined
+												: 'Add an App Store listing URL first'}
+										>
+											{#if app.affiliateEnabled}
+												<CheckIcon class="size-3.5" /> On
+											{:else}
+												Off
+											{/if}
+										</Button>
+									</form>
+								{:else if app.affiliateEnabled}
+									<StatusBadge status="approved" label="On" />
+								{:else}
+									<span class="text-sm text-muted-foreground">Off</span>
+								{/if}
 							</Table.Cell>
-							<Table.Cell class="text-muted-foreground">{app.cookieDays}d</Table.Cell>
+							<Table.Cell class="text-muted-foreground">
+								{#if app.affiliateEnabled}
+									{commissionLabel(app.commissionBps, app.commissionMonths)}
+									<span class="block text-xs">{app.cookieDays}d cookie</span>
+								{:else}
+									—
+								{/if}
+							</Table.Cell>
 							<Table.Cell><StatusBadge status={app.status} /></Table.Cell>
 							<Table.Cell class="text-right tabular-nums">
 								{app.activeInstalls}
@@ -231,14 +305,16 @@
 			</div>
 
 			<div class="space-y-2">
-				<Label for="listingUrl">App Store listing URL</Label>
+				<Label for="listingUrl">
+					App Store listing URL
+					<span class="text-muted-foreground">(required to offer it to affiliates)</span>
+				</Label>
 				<Input
 					id="listingUrl"
 					name="listingUrl"
 					type="url"
 					value={editing?.listingUrl ?? ''}
-					placeholder="https://apps.shopify.com/kaching-bundles"
-					required
+					placeholder="https://apps.shopify.com/your-app"
 				/>
 			</div>
 

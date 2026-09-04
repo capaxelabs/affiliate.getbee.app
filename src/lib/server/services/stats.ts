@@ -104,7 +104,7 @@ export async function affiliateApps(db: DrizzleClient, affiliateId: string) {
 			)`
 		})
 		.from(apps)
-		.where(eq(apps.status, 'active'))
+		.where(and(eq(apps.status, 'active'), eq(apps.affiliateEnabled, true)))
 		.orderBy(apps.name);
 
 	return rows.map((row) => ({

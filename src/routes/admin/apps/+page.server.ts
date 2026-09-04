@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { requireAdminAccess, requireOwner, appScopeFilter } from '$lib/server/scope';
 import { apps, auditLog, partnerAccounts } from '$lib/server/db/schema';
 import { revenueByApp } from '$lib/server/services/stats';
+import { syncApps, syncableAccounts } from '$lib/server/services/sync';
 import { lifecycleEmailStats } from '$lib/server/services/lifecycle';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -30,7 +31,10 @@ export const load: PageServerLoad = async (event) => {
 
 	const revenueById = new Map(revenue.map((r) => [r.appId, r]));
 
+	const connectedAccounts = await syncableAccounts(event.locals.db);
+
 	return {
+		canDiscover: connectedAccounts.length > 0,
 		apps: rows.map((r) => {
 			const stats = revenueById.get(r.app.id);
 			return {
@@ -59,7 +63,12 @@ const appSchema = z.object({
 		.min(2, 'Slug is required.')
 		.max(60)
 		.regex(/^[a-z0-9-]+$/, 'Slug can only use lowercase letters, numbers and dashes.'),
-	listingUrl: z.string().trim().url('Listing URL must be a full URL.'),
+	listingUrl: z
+		.string()
+		.trim()
+		.url('Listing URL must be a full URL.')
+		.optional()
+		.or(z.literal('')),
 	iconUrl: z.string().trim().url('Icon URL must be a full URL.').optional().or(z.literal('')),
 	partnerAccountId: z.string().trim().max(60).optional(),
 	partnerAppId: z.string().trim().max(120).optional(),
@@ -77,7 +86,7 @@ function toValues(input: z.infer<typeof appSchema>) {
 	return {
 		name: input.name,
 		slug: input.slug,
-		listingUrl: input.listingUrl,
+		listingUrl: input.listingUrl || null,
 		iconUrl: input.iconUrl || null,
 		partnerAccountId: input.partnerAccountId || null,
 		partnerAppId: input.partnerAppId || null,
@@ -104,7 +113,14 @@ export const actions: Actions = {
 			.limit(1);
 		if (clash) return fail(409, { error: `An app already uses the slug "${parsed.data.slug}".` });
 
-		const [created] = await event.locals.db.insert(apps).values(toValues(parsed.data)).returning();
+		if (!parsed.data.listingUrl) {
+			return fail(400, { error: 'An App Store listing URL is required.' });
+		}
+
+		const [created] = await event.locals.db
+			.insert(apps)
+			.values({ ...toValues(parsed.data), affiliateEnabled: true, source: 'manual' })
+			.returning();
 
 		await event.locals.db.insert(auditLog).values({
 			actorUserId: admin.userId,
@@ -149,6 +165,89 @@ export const actions: Actions = {
 		});
 
 		return { success: true, message: `${parsed.data.name} saved.` };
+	},
+
+	/** Pulls every app from each connected Partner account. */
+	discover: async (event) => {
+		const admin = await requireOwner(event);
+		const accounts = await syncableAccounts(event.locals.db);
+
+		if (!accounts.length) {
+			return fail(400, {
+				error: 'Connect a Partner account with an access token first.'
+			});
+		}
+
+		let created = 0;
+		let updated = 0;
+		const failures: string[] = [];
+
+		for (const account of accounts) {
+			const result = await syncApps(event.locals.db, event.platform!.env, account);
+			if (result.status === 'failed') failures.push(`${account.name}: ${result.error}`);
+			created += result.created;
+			updated += result.updated;
+		}
+
+		await event.locals.db.insert(auditLog).values({
+			actorUserId: admin.userId,
+			action: 'app.discover',
+			entityType: 'partner_account',
+			entityId: accounts.map((a) => a.id).join(','),
+			metadata: { created, updated }
+		});
+
+		if (failures.length) return fail(502, { error: failures.join(' · ') });
+
+		return {
+			success: true,
+			message: created
+				? `Found ${created} new app${created === 1 ? '' : 's'}. Turn on the ones you want affiliates to promote.`
+				: updated
+					? `No new apps. Refreshed ${updated}.`
+					: 'No new apps found.'
+		};
+	},
+
+	/**
+	 * Opts an app into or out of the affiliate program. Opting in needs a listing
+	 * URL, because that is where affiliate links point.
+	 */
+	toggleAffiliate: async (event) => {
+		const admin = await requireOwner(event);
+		const data = await event.request.formData();
+		const id = String(data.get('id') ?? '');
+
+		const [app] = await event.locals.db.select().from(apps).where(eq(apps.id, id)).limit(1);
+		if (!app) return fail(404, { error: 'App not found.' });
+
+		const enable = !app.affiliateEnabled;
+
+		if (enable && !app.listingUrl) {
+			return fail(400, {
+				error: `Add an App Store listing URL to ${app.name} before offering it to affiliates.`
+			});
+		}
+
+		await event.locals.db
+			.update(apps)
+			.set({ affiliateEnabled: enable, updatedAt: new Date() })
+			.where(eq(apps.id, id));
+
+		await event.locals.db.insert(auditLog).values({
+			actorUserId: admin.userId,
+			action: enable ? 'app.affiliate_on' : 'app.affiliate_off',
+			entityType: 'app',
+			entityId: id,
+			metadata: { name: app.name }
+		});
+
+		return {
+			success: true,
+			message: enable
+				? `${app.name} is now offered to affiliates.`
+				: `${app.name} is no longer offered to affiliates. Existing referrals keep earning.`
+		};
 	},
 
 	toggleStatus: async (event) => {

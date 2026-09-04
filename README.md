@@ -158,12 +158,25 @@ In the admin: **Partner accounts → Connect account**.
 - **Partner Access Token** — Partner dashboard → Settings → Partner API clients.
   It needs read access to app events and transactions.
 
-Add several accounts if your apps live under different organizations. Each app is
-then linked to one account on the **Apps** page, along with its Partner app id
-(`gid://partners/App/...`), which is how transactions get matched.
+Connecting an account immediately pulls in **every app** on that Partner
+organization. You do not add apps by hand. Use **Sync apps from Shopify** on the
+Apps page to pick up apps added later; the hourly sync does it too.
+
+Add several accounts if your apps live under different organizations.
 
 Tokens are encrypted before storage and never sent back to a browser — the UI
 shows a masked hint and lets you replace them.
+
+### Choosing which apps affiliates promote
+
+Revenue, installs and merchants are tracked for **every** discovered app. The
+affiliate program is opt-in per app: flip **Affiliate** to On in the Apps table
+for the ones you want promoted. If you run ten apps and only want three in the
+program, leave the other seven off.
+
+An app needs an App Store listing URL before it can be switched on, since that is
+where its affiliate links point. Turning an app off stops new referrals; referrals
+already attributed to it keep earning.
 
 ---
 

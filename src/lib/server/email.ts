@@ -154,7 +154,7 @@ export function sendPayoutPaidEmail(env: Env, to: string, amount: string, refere
 /* ------------------------------------------------- merchant lifecycle mail */
 
 type MerchantLike = { shopDomain: string; name: string | null; ownerName: string | null };
-type AppLike = { name: string; listingUrl: string; supportEmail: string | null };
+type AppLike = { name: string; listingUrl: string | null; supportEmail: string | null };
 
 function greeting(merchant: MerchantLike) {
 	const who = merchant.ownerName?.split(' ')[0] ?? merchant.name;
@@ -178,7 +178,7 @@ export function sendMerchantWelcomeEmail(
 			If anything looks off, or you want a hand getting it set up the way you need, just reply to
 			this email. A real person reads it.
 		</p>
-		${button(app.listingUrl, `Open ${app.name}`)}
+		${app.listingUrl ? button(app.listingUrl, `Open ${app.name}`) : ''}
 		<p style="color:#71717a;font-size:13px;margin:24px 0 0;">
 			Questions? Reply here or write to ${reply}.
 		</p>`;
@@ -187,7 +187,7 @@ export function sendMerchantWelcomeEmail(
 		to,
 		subject: `You're all set with ${app.name}`,
 		html: layout(env, content),
-		text: `${greeting(merchant)} ${app.name} is now live on ${merchant.name ?? merchant.shopDomain}. Reply to this email if you need a hand. ${app.listingUrl}`
+		text: `${greeting(merchant)} ${app.name} is now live on ${merchant.name ?? merchant.shopDomain}. Reply to this email if you need a hand.${app.listingUrl ? ` ${app.listingUrl}` : ''}`
 	});
 }
 

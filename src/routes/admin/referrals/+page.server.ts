@@ -40,7 +40,13 @@ export const load: PageServerLoad = async (event) => {
 		db
 			.select({ id: apps.id, name: apps.name })
 			.from(apps)
-			.where(and(eq(apps.status, 'active'), appScopeFilter(scope, apps.id)))
+			.where(
+				and(
+					eq(apps.status, 'active'),
+					eq(apps.affiliateEnabled, true),
+					appScopeFilter(scope, apps.id)
+				)
+			)
 			.orderBy(apps.name),
 		db
 			.select({ id: affiliates.id, refCode: affiliates.refCode, email: users.email, name: users.name })

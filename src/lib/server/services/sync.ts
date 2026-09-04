@@ -13,6 +13,7 @@ import { normalizeShopDomain } from './referral';
 import { recordInstall, upsertMerchant } from './merchant';
 import {
 	chargeTypeFor,
+	fetchApps,
 	fetchInstalls,
 	fetchTransactions,
 	toCents,
@@ -50,6 +51,126 @@ async function credentialsFor(env: Env, account: Account): Promise<PartnerCreden
 		apiToken: await decryptSecret(env, account.apiTokenEncrypted),
 		apiVersion: account.apiVersion
 	};
+}
+
+/** "Kaching Bundles & Upsells" -> "kaching-bundles-upsells" */
+function slugify(name: string) {
+	return (
+		name
+			.toLowerCase()
+			.replace(/[^a-z0-9]+/g, '-')
+			.replace(/^-+|-+$/g, '')
+			.slice(0, 50) || 'app'
+	);
+}
+
+/** Picks a slug that is not taken yet. */
+async function uniqueSlug(db: DrizzleClient, name: string) {
+	const base = slugify(name);
+	for (let i = 0; i < 20; i++) {
+		const candidate = i === 0 ? base : `${base}-${i + 1}`;
+		const [clash] = await db
+			.select({ id: apps.id })
+			.from(apps)
+			.where(eq(apps.slug, candidate))
+			.limit(1);
+		if (!clash) return candidate;
+	}
+	return `${base}-${Math.floor(Date.now() / 1000)}`;
+}
+
+export type AppSyncSummary = {
+	partnerAccountId: string;
+	partnerAccountName: string;
+	status: 'success' | 'failed';
+	seen: number;
+	created: number;
+	updated: number;
+	error?: string;
+};
+
+/**
+ * Pulls every app in the Partner organization and records it. Apps arrive with
+ * affiliate participation off — revenue and merchant analytics start flowing
+ * immediately, but an admin opts an app into the affiliate program by hand.
+ *
+ * Never overwrites the fields an admin owns (slug, listing URL, commission,
+ * affiliate opt-in); only the name is refreshed from Shopify.
+ */
+export async function syncApps(
+	db: DrizzleClient,
+	env: Env,
+	account: Account
+): Promise<AppSyncSummary> {
+	const base = { partnerAccountId: account.id, partnerAccountName: account.name };
+	let seen = 0;
+	let created = 0;
+	let updated = 0;
+
+	try {
+		const credentials = await credentialsFor(env, account);
+
+		let cursor: string | null = null;
+		let hasNextPage = true;
+
+		while (hasNextPage) {
+			const page = await fetchApps(credentials, { after: cursor });
+			hasNextPage = page.hasNextPage;
+			cursor = page.cursor;
+			seen += page.apps.length;
+
+			for (const partnerApp of page.apps) {
+				const [existing] = await db
+					.select()
+					.from(apps)
+					.where(eq(apps.partnerAppId, partnerApp.id))
+					.limit(1);
+
+				if (existing) {
+					if (existing.name !== partnerApp.name || existing.partnerAccountId !== account.id) {
+						await db
+							.update(apps)
+							.set({
+								name: partnerApp.name,
+								partnerAccountId: account.id,
+								updatedAt: new Date()
+							})
+							.where(eq(apps.id, existing.id));
+						updated++;
+					}
+					continue;
+				}
+
+				await db.insert(apps).values({
+					name: partnerApp.name,
+					slug: await uniqueSlug(db, partnerApp.name),
+					partnerAppId: partnerApp.id,
+					partnerAccountId: account.id,
+					listingUrl: null,
+					affiliateEnabled: false,
+					source: 'partner_api'
+				});
+				created++;
+			}
+
+			if (!page.cursor) break;
+		}
+
+		await db
+			.update(partnerAccounts)
+			.set({ lastSyncError: null, updatedAt: new Date() })
+			.where(eq(partnerAccounts.id, account.id));
+
+		return { ...base, status: 'success', seen, created, updated };
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		await db
+			.update(partnerAccounts)
+			.set({ lastSyncError: message, updatedAt: new Date() })
+			.where(eq(partnerAccounts.id, account.id));
+
+		return { ...base, status: 'failed', seen, created, updated, error: message };
+	}
 }
 
 /** Where to resume from for this account: its last successful run, else 30 days back. */
@@ -395,6 +516,7 @@ export async function syncInstalls(
 
 export type FullSyncResult = {
 	accounts: number;
+	apps: AppSyncSummary[];
 	installs: SyncSummary[];
 	transactions: SyncSummary[];
 	released: number;
@@ -409,10 +531,14 @@ export async function runFullSync(
 ): Promise<FullSyncResult> {
 	const accounts = await syncableAccounts(db, partnerAccountId);
 
+	const appRuns: AppSyncSummary[] = [];
 	const installs: SyncSummary[] = [];
 	const transactionRuns: SyncSummary[] = [];
 
 	for (const account of accounts) {
+		// Discover first, so an app added in Shopify today starts collecting
+		// revenue on this same run.
+		appRuns.push(await syncApps(db, env, account));
 		installs.push(await syncInstalls(db, env, account, trigger));
 		transactionRuns.push(await syncTransactions(db, env, account, trigger));
 	}
@@ -420,5 +546,11 @@ export async function runFullSync(
 	// One pass at the end rather than once per account.
 	const released = accounts.length ? await releaseMaturedCommissions(db) : 0;
 
-	return { accounts: accounts.length, installs, transactions: transactionRuns, released };
+	return {
+		accounts: accounts.length,
+		apps: appRuns,
+		installs,
+		transactions: transactionRuns,
+		released
+	};
 }

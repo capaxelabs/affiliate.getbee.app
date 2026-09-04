@@ -32,6 +32,11 @@ export type PartnerTransaction = {
 	netAmount: { amount: string; currencyCode: string } | null;
 };
 
+export type PartnerApp = {
+	id: string;
+	name: string;
+};
+
 export type PartnerInstallEvent = {
 	occurredAt: string;
 	shopDomain: string | null;
@@ -73,6 +78,17 @@ query AffiliateTransactions($after: String, $createdAtMin: DateTime) {
           netAmount { amount currencyCode }
         }
       }
+    }
+  }
+}`;
+
+const APPS_QUERY = `
+query PartnerApps($after: String) {
+  apps(first: 100, after: $after) {
+    pageInfo { hasNextPage }
+    edges {
+      cursor
+      node { id name }
     }
   }
 }`;
@@ -167,6 +183,30 @@ export async function fetchTransactions(
 		})),
 		cursor: edges.at(-1)?.cursor ?? null,
 		hasNextPage: data.transactions.pageInfo.hasNextPage
+	};
+}
+
+type AppsResponse = {
+	apps: {
+		pageInfo: { hasNextPage: boolean };
+		edges: { cursor: string; node: { id: string; name: string } }[];
+	};
+};
+
+/** Every app in the Partner organization. */
+export async function fetchApps(
+	credentials: PartnerCredentials,
+	options: { after?: string | null } = {}
+): Promise<{ apps: PartnerApp[]; cursor: string | null; hasNextPage: boolean }> {
+	const data = await request<AppsResponse>(credentials, APPS_QUERY, {
+		after: options.after ?? null
+	});
+
+	const edges = data.apps.edges;
+	return {
+		apps: edges.map(({ node }) => ({ id: node.id, name: node.name })),
+		cursor: edges.at(-1)?.cursor ?? null,
+		hasNextPage: data.apps.pageInfo.hasNextPage
 	};
 }
 

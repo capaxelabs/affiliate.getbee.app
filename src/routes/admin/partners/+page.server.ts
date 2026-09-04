@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { requireOwner } from '$lib/server/scope';
 import { apps, auditLog, partnerAccounts, partnerSyncRuns } from '$lib/server/db/schema';
 import { encryptSecret, encryptionConfigured, tokenHint, EncryptionError } from '$lib/server/crypto';
+import { syncApps } from '$lib/server/services/sync';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async (event) => {
@@ -104,7 +105,22 @@ export const actions: Actions = {
 				metadata: { name: created.name, organizationId: created.organizationId }
 			});
 
-			return { success: true, message: `${created.name} connected.` };
+			// Pull the account's apps straight away so there is nothing to add by hand.
+			const discovered = await syncApps(event.locals.db, env, created);
+
+			if (discovered.status === 'failed') {
+				return {
+					success: true,
+					message: `${created.name} connected, but fetching its apps failed: ${discovered.error}`
+				};
+			}
+
+			return {
+				success: true,
+				message: discovered.created
+					? `${created.name} connected — found ${discovered.created} app${discovered.created === 1 ? '' : 's'}. Switch on Affiliate for the ones you want promoted.`
+					: `${created.name} connected. No apps found on that Partner account.`
+			};
 		} catch (error) {
 			if (error instanceof EncryptionError) return fail(503, { error: error.message });
 			throw error;
@@ -149,6 +165,16 @@ export const actions: Actions = {
 		}
 
 		await event.locals.db.update(partnerAccounts).set(patch).where(eq(partnerAccounts.id, id));
+
+		// A fresh token may reach apps the old one could not.
+		if (parsed.data.apiToken) {
+			const [refreshed] = await event.locals.db
+				.select()
+				.from(partnerAccounts)
+				.where(eq(partnerAccounts.id, id))
+				.limit(1);
+			if (refreshed) await syncApps(event.locals.db, env, refreshed);
+		}
 
 		await event.locals.db.insert(auditLog).values({
 			actorUserId: owner.userId,
@@ -200,9 +226,13 @@ export const actions: Actions = {
 				entityId: created.id
 			});
 
+			const discovered = await syncApps(event.locals.db, env, created);
+
 			return {
 				success: true,
-				message: 'Imported. Rename it, then remove the PARTNER_* worker secrets.'
+				message: discovered.created
+					? `Imported and found ${discovered.created} app${discovered.created === 1 ? '' : 's'}. Rename the account, then remove the PARTNER_* worker secrets.`
+					: 'Imported. Rename it, then remove the PARTNER_* worker secrets.'
 			};
 		} catch (error) {
 			if (error instanceof EncryptionError) return fail(503, { error: error.message });

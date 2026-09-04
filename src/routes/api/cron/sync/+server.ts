@@ -26,6 +26,8 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 	const lifecycle = await processLifecycleEmails(locals.db, platform!.env);
 	await pruneLoginCodes(locals.db);
 
-	const failed = [...result.installs, ...result.transactions].some((r) => r.status === 'failed');
+	const failed = [...result.apps, ...result.installs, ...result.transactions].some(
+		(r) => r.status === 'failed'
+	);
 	return json({ ...result, lifecycle }, { status: failed ? 502 : 200 });
 };

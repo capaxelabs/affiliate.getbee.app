@@ -62,6 +62,9 @@ export async function attributeReferral(
 
 	const [app] = await db.select().from(apps).where(eq(apps.id, input.appId)).limit(1);
 	if (!app) return { ok: false, error: 'Unknown app.' };
+	if (!app.affiliateEnabled) {
+		return { ok: false, error: `${app.name} is not part of the affiliate program.` };
+	}
 
 	const bps = await resolveCommissionBps(db, input.affiliateId, input.appId);
 	const installedAt = input.installedAt ?? null;

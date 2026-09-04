@@ -113,6 +113,23 @@ buttons in the UI is a convenience on top of that, never the guard itself.
 Grants live in `admin_scopes`: a row names either one app, or a partner account
 (covering every app under it, including ones added later).
 
+## Apps and affiliate opt-in
+
+Apps are **discovered from the Partner API**, not entered by hand — connecting an
+account, hitting "Sync apps from Shopify", or the hourly cron all call `syncApps`.
+Discovery only ever writes `name`, `partnerAppId` and `partnerAccountId`; the
+fields an admin owns (`slug`, `listingUrl`, commission, `affiliateEnabled`) are
+never overwritten.
+
+`apps.affiliateEnabled` decides participation in the affiliate program, and it is
+off for a discovered app. Analytics — revenue, installs, merchants — cover every
+app regardless. Anything affiliate-facing must filter on it: the affiliate home,
+the claim dialog, `/r/{code}/{app}`, admin manual attribution, and
+`attributeReferral`, which refuses a non-participating app outright.
+
+Switching an app on requires a `listingUrl`. Switching it off stops new referrals
+but leaves existing ones earning.
+
 ## Partner accounts
 
 Several Shopify Partner organizations can be connected at once. `partner_accounts`

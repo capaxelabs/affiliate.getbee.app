@@ -97,6 +97,20 @@ Three roles, one login (email magic-code):
       accounts in production
 - [ ] After importing, delete the `PARTNER_*` worker secrets
 
+## App discovery and affiliate opt-in
+
+- [x] Pull every app from the Partner API (`syncApps`) — on connect, on demand
+      from the Apps page, and on every cron run
+- [x] Discovery never overwrites admin-owned fields (slug, listing URL,
+      commission, affiliate opt-in); only the name is refreshed
+- [x] `apps.affiliateEnabled` — analytics cover every app, the affiliate program
+      is opt-in per app
+- [x] Opting in requires an App Store listing URL; opting out stops new referrals
+      but leaves existing ones earning
+- [x] Every affiliate surface filters on the flag, including `attributeReferral`
+- [ ] Verify the Partner API `apps` query against a live token — the failure path
+      is tested, a successful pull is not
+
 ## Restricted team access
 
 - [x] `staff` role — read-only, enforced in `hooks.server.ts` (non-GET to `/admin/*` is 403)

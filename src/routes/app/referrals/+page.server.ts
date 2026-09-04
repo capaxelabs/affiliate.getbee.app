@@ -52,7 +52,7 @@ export const load: PageServerLoad = async (event) => {
 		db
 			.select({ id: apps.id, name: apps.name })
 			.from(apps)
-			.where(eq(apps.status, 'active'))
+			.where(and(eq(apps.status, 'active'), eq(apps.affiliateEnabled, true)))
 			.orderBy(apps.name)
 	]);
 
@@ -93,9 +93,15 @@ export const actions: Actions = {
 		const [app] = await event.locals.db
 			.select({ id: apps.id })
 			.from(apps)
-			.where(and(eq(apps.id, parsed.data.appId), eq(apps.status, 'active')))
+			.where(
+				and(
+					eq(apps.id, parsed.data.appId),
+					eq(apps.status, 'active'),
+					eq(apps.affiliateEnabled, true)
+				)
+			)
 			.limit(1);
-		if (!app) return fail(400, { error: 'That app is not in the program.' });
+		if (!app) return fail(400, { error: 'That app is not in the affiliate program.' });
 
 		const [existingReferral] = await event.locals.db
 			.select({ affiliateId: referrals.affiliateId })
