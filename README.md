@@ -103,6 +103,10 @@ A `routes` entry only takes effect on deploy, and the first deploy with a
 `custom_domain` also provisions the hostname and certificate — allow a minute
 before the hostname stops returning 404.
 
+If you connect the repo to **Cloudflare Workers Builds**, every push to `main`
+deploys on its own and you never run this by hand. See
+[Shipping changes](#shipping-changes) for the one ordering rule that matters.
+
 ```bash
 curl -o /dev/null -w '%{http_code}\n' https://your-domain.example/login   # expect 200
 ```
@@ -118,6 +122,31 @@ npx wrangler d1 execute bee-affiliates --remote \
 ```
 
 Sign out and back in. You will land on `/admin`.
+
+---
+
+## Shipping changes
+
+With Workers Builds connected, pushing to `main` deploys. **Migrations are not
+part of that build** — only the worker is.
+
+That makes the order matter whenever a change touches `schema.ts`:
+
+```bash
+npm run db:generate        # write the migration
+npm run db:migrate:remote  # apply it to production FIRST
+git push                   # then ship the code that depends on it
+```
+
+Push code that expects a new column before the migration has run and every
+request touching that table 500s until you catch up. Adding a column is safe in
+that order because the old code simply ignores it.
+
+Check what production is actually running:
+
+```bash
+npx wrangler d1 migrations list bee-affiliates --remote
+```
 
 ---
 

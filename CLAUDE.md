@@ -171,6 +171,19 @@ Welcome and offboarding email are **off per app** until switched on in
 `/admin/apps`. Both are queued into `lifecycle_emails` with a delay (welcome +15m,
 offboarding +1h) and sent when the cron endpoint drains the outbox.
 
+## Shipping
+
+Cloudflare Workers Builds deploys every push to `main`. Migrations are **not**
+part of that build, so anything touching `schema.ts` must be applied to
+production before the code that needs it is pushed:
+
+```bash
+npm run db:generate && npm run db:migrate:remote && git push
+```
+
+Never hand someone a "run npm run deploy" instruction for this repo — pushing is
+the deploy.
+
 ## Scheduling
 
 adapter-cloudflare exports only a `fetch` handler, so there is no `scheduled()` hook and
