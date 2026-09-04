@@ -1,7 +1,19 @@
-# Local-only secrets for `npm run dev`. Copy to .dev.vars.
-# Leave EMAIL_API_KEY empty to print sign-in codes to the console instead of emailing.
+# Local-only secrets for `npm run dev`. Copy this file to .dev.vars.
+# .dev.vars is gitignored — never commit real values.
+
+# Encrypts Shopify Partner API tokens stored in D1.
+# Required before you can connect a Partner account.
+ENCRYPTION_KEY=local-dev-encryption-key
+
+# Signs install/uninstall calls from your apps and guards POST /api/cron/sync.
+CRON_SECRET=local-dev-secret
+
+# Leave empty to print sign-in codes and lifecycle email to the console
+# instead of sending them.
 EMAIL_API_KEY=
+
+# Legacy single-account Partner credentials. Only needed if you want the
+# "Import from environment" button on the Partner accounts page. New setups
+# connect accounts through the UI instead.
 PARTNER_ORG_ID=
 PARTNER_API_TOKEN=
-CRON_SECRET=local-dev-secret
-ENCRYPTION_KEY=
