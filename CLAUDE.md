@@ -200,12 +200,22 @@ the deploy.
 
 ## Scheduling
 
-adapter-cloudflare exports only a `fetch` handler, so there is no `scheduled()` hook and
-no cron trigger in `wrangler.jsonc`. Point any scheduler at:
+Cron Triggers run `0 3 * * *` (full sync) and `0 * * * *` (lifecycle email only).
+
+adapter-cloudflare emits only `fetch`, and its `index.js` sets
+`worker_dest = wrangler_config.main` — it writes its bundle **to** `main`, so a
+wrapper committed there is destroyed on every build. `scripts/wrap-worker.mjs`
+therefore runs after it, renaming the bundle to `worker-core.js` and generating
+`worker.js` with a `scheduled` handler. Keep the bundle at the repo root: its
+imports are relative to `main`, so moving it into a subdirectory breaks the
+build. Both files are gitignored build artifacts — edit the generator, not them.
+
+The endpoint is also reachable directly:
 
 ```
-POST /api/cron/sync   Authorization: Bearer $CRON_SECRET
+POST /api/cron/sync[?task=lifecycle]   Authorization: Bearer $CRON_SECRET
 ```
+
 
 ## Secrets
 
