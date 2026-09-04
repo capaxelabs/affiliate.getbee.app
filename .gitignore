@@ -10,3 +10,5 @@ node_modules
 .dev.vars
 .playwright-mcp
 plan/
+/worker.js
+/worker-core.js

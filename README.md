@@ -320,18 +320,27 @@ Both endpoints are idempotent, so a retried webhook is safe.
 
 ## Scheduled sync
 
-`adapter-cloudflare` only exports a fetch handler, so there is no `scheduled()`
-hook and no cron trigger in `wrangler.jsonc`. Point any scheduler at:
+Two [Cron Triggers](https://developers.cloudflare.com/workers/configuration/cron-triggers/)
+in `wrangler.jsonc`:
+
+| Schedule | Does |
+| --- | --- |
+| `0 3 * * *` | Full sync — discover apps, pull installs and transactions for every connected Partner account, clear matured commissions, send queued email |
+| `0 * * * *` | Lifecycle email outbox only, so a welcome is not a day late |
+
+`adapter-cloudflare` emits only a `fetch` handler and writes it to whatever
+`main` points at, so a hand-written wrapper there gets overwritten every build.
+`scripts/wrap-worker.mjs` runs after the adapter, moves its bundle to
+`worker-core.js` and generates a `worker.js` that re-exports `fetch` and adds
+`scheduled`. Both are build artifacts and gitignored. The bundle has to stay at
+the repo root — the adapter emits imports relative to `main`.
+
+The same endpoint works from any external scheduler:
 
 ```bash
 curl -X POST https://your-domain.example/api/cron/sync \
-  -H "Authorization: Bearer $CRON_SECRET"
+  -H "Authorization: Bearer $CRON_SECRET"          # add ?task=lifecycle to skip the Partner API
 ```
-
-Hourly is a sensible default. Each run pulls installs and transactions for every
-connected Partner account, clears commissions past their hold window, and sends
-any queued lifecycle email. GitHub Actions, cron-job.org, or a small companion
-Worker with a cron trigger all work.
 
 ---
 

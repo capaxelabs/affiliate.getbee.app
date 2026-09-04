@@ -10,8 +10,11 @@ import type { RequestHandler } from './$types';
  *
  *   curl -X POST https://affiliate.getbee.app/api/cron/sync \
  *        -H "Authorization: Bearer $CRON_SECRET"
+ *
+ * Cron Triggers reach it through worker.js. `?task=lifecycle` skips the Partner
+ * API and only sends queued merchant email.
  */
-export const POST: RequestHandler = async ({ request, locals, platform }) => {
+export const POST: RequestHandler = async ({ request, url, locals, platform }) => {
 	const secret = platform?.env?.CRON_SECRET;
 	if (!secret) return json({ error: 'Sync is not configured.' }, { status: 503 });
 
@@ -19,15 +22,25 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 		return json({ error: 'Unauthorized' }, { status: 401 });
 	}
 
+	// `task=lifecycle` only drains the outbox. The hourly trigger uses it so a
+	// welcome email is not delayed by a day, without hitting the Partner API
+	// twenty-four times over.
+	const task = url.searchParams.get('task') === 'lifecycle' ? 'lifecycle' : 'all';
+
+	if (task === 'lifecycle') {
+		const lifecycle = await processLifecycleEmails(locals.db, platform!.env);
+		return json({ task, lifecycle });
+	}
+
 	const result = await runFullSync(locals.db, platform!.env, 'cron');
 
-	// Drain the merchant lifecycle outbox regardless of how the sync went — the
-	// queue is filled by install webhooks, not by the Partner API.
+	// Drain the outbox regardless of how the sync went — the queue is filled by
+	// install webhooks, not by the Partner API.
 	const lifecycle = await processLifecycleEmails(locals.db, platform!.env);
 	await pruneLoginCodes(locals.db);
 
 	const failed = [...result.apps, ...result.installs, ...result.transactions].some(
 		(r) => r.status === 'failed'
 	);
-	return json({ ...result, lifecycle }, { status: failed ? 502 : 200 });
+	return json({ task, ...result, lifecycle }, { status: failed ? 502 : 200 });
 };

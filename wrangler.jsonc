@@ -7,7 +7,8 @@
 		"nodejs_als",
 		"nodejs_compat"
 	],
-	"main": ".svelte-kit/cloudflare/_worker.js",
+	// Wraps the adapter's generated worker to add a scheduled handler; see worker.js.
+	"main": "worker.js",
 	"assets": {
 		"binding": "ASSETS",
 		"directory": ".svelte-kit/cloudflare"
@@ -20,6 +21,10 @@
 	},
 	"workers_dev": true,
 	"preview_urls": true,
+	"triggers": {
+		// 03:00 UTC: full Partner API sync. Hourly: lifecycle email outbox only.
+		"crons": ["0 3 * * *", "0 * * * *"]
+	},
 	"d1_databases": [
 		{
 			"binding": "DB",
