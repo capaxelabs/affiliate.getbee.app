@@ -36,7 +36,11 @@
 		"EMAIL_FROM": "Bee Affiliates <affiliates@getbee.app>",
 		// Default Partner API version for newly connected accounts.
 		"PARTNER_API_VERSION": "2025-01"
-	}
+	},
+	"routes": [
+		{ "pattern": "affiliate.getbee.app", "custom_domain": true }
+	]
+
 	// Secrets (set with `wrangler secret put <NAME>`):
 	//   EMAIL_API_KEY     — tools.capaxe.com/email api key
 	//   PARTNER_ORG_ID    — Shopify Partner organization id
