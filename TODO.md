@@ -28,8 +28,9 @@ Three roles, one login (email magic-code):
 - [x] `hooks.server.ts` session load + role guards for `/app` and `/admin`
 - [x] Email sender (tools.capaxe.com/email) with login-code + lifecycle templates
 - [x] Generate migration `0000` and apply it to local D1
-- [ ] Create the real D1 database + KV namespace, paste ids into wrangler.jsonc
-      (`wrangler d1 create bee-affiliates`, `wrangler kv namespace create KV`)
+- [ ] Create the D1 database and paste `database_id` into wrangler.jsonc
+      (`npx wrangler d1 create bee-affiliates`) — the only placeholder left
+- [ ] Set the three secrets: `ENCRYPTION_KEY`, `CRON_SECRET`, `EMAIL_API_KEY`
 
 ## Affiliate portal (`/app`)
 
