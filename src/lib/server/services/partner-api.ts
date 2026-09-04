@@ -82,17 +82,6 @@ query AffiliateTransactions($after: String, $createdAtMin: DateTime) {
   }
 }`;
 
-const APPS_QUERY = `
-query PartnerApps($after: String) {
-  apps(first: 100, after: $after) {
-    pageInfo { hasNextPage }
-    edges {
-      cursor
-      node { id name }
-    }
-  }
-}`;
-
 const INSTALLS_QUERY = `
 query AffiliateInstalls($appId: ID!, $after: String, $occurredAtMin: DateTime) {
   app(id: $appId) {
@@ -186,28 +175,41 @@ export async function fetchTransactions(
 	};
 }
 
-type AppsResponse = {
-	apps: {
-		pageInfo: { hasNextPage: boolean };
-		edges: { cursor: string; node: { id: string; name: string } }[];
-	};
-};
-
-/** Every app in the Partner organization. */
-export async function fetchApps(
+/**
+ * Distinct apps seen in the org's billing transactions.
+ *
+ * The Partner API has no field that lists an organization's apps — QueryRoot
+ * exposes only `app(id:)`, `transactions`, `events` and `activeSubscription`,
+ * and the org-wide `Relationship` event carries no app reference. Every
+ * transaction does name its app, so that is the one place app identity leaks
+ * out. An app with no transactions yet cannot be discovered and has to be added
+ * by hand.
+ */
+export async function discoverApps(
 	credentials: PartnerCredentials,
-	options: { after?: string | null } = {}
-): Promise<{ apps: PartnerApp[]; cursor: string | null; hasNextPage: boolean }> {
-	const data = await request<AppsResponse>(credentials, APPS_QUERY, {
-		after: options.after ?? null
-	});
+	options: { since?: Date; maxPages?: number } = {}
+): Promise<PartnerApp[]> {
+	const since = options.since ?? new Date(Date.now() - 730 * 24 * 60 * 60 * 1000);
+	const maxPages = options.maxPages ?? 40;
 
-	const edges = data.apps.edges;
-	return {
-		apps: edges.map(({ node }) => ({ id: node.id, name: node.name })),
-		cursor: edges.at(-1)?.cursor ?? null,
-		hasNextPage: data.apps.pageInfo.hasNextPage
-	};
+	const found = new Map<string, string>();
+	let after: string | null = null;
+
+	for (let page = 0; page < maxPages; page++) {
+		const result = await fetchTransactions(credentials, {
+			after,
+			createdAtMin: since.toISOString()
+		});
+
+		for (const txn of result.transactions) {
+			if (txn.appId) found.set(txn.appId, txn.appName ?? txn.appId);
+		}
+
+		if (!result.hasNextPage || !result.cursor) break;
+		after = result.cursor;
+	}
+
+	return [...found].map(([id, name]) => ({ id, name }));
 }
 
 type InstallsResponse = {

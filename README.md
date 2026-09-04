@@ -158,9 +158,23 @@ In the admin: **Partner accounts → Connect account**.
 - **Partner Access Token** — Partner dashboard → Settings → Partner API clients.
   It needs read access to app events and transactions.
 
-Connecting an account immediately pulls in **every app** on that Partner
-organization. You do not add apps by hand. Use **Sync apps from Shopify** on the
-Apps page to pick up apps added later; the hourly sync does it too.
+The **API version** must be one Shopify currently serves — a retired or invented
+version fails with a 404 and the misleading message "Invalid API version". Ask the
+API which ones are live:
+
+```bash
+curl -s "https://partners.shopify.com/<partner-id>/api/unstable/graphql.json" \
+  -H "X-Shopify-Access-Token: <token>" -H 'Content-Type: application/json' \
+  -d '{"query":"{ publicApiVersions { handle supported } }"}'
+```
+
+Connecting an account discovers your apps automatically. Use **Sync apps from
+Shopify** on the Apps page to pick up new ones; the hourly sync does it too.
+
+> The Partner API has no field that lists an organization's apps, so apps are
+> derived from billing transactions. **An app with no transactions yet cannot be
+> discovered** — add those with **Add manually**, giving the app's
+> `gid://partners/App/...` id so the sync can match it later.
 
 Add several accounts if your apps live under different organizations.
 

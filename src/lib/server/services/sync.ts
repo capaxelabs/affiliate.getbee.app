@@ -13,7 +13,7 @@ import { normalizeShopDomain } from './referral';
 import { recordInstall, upsertMerchant } from './merchant';
 import {
 	chargeTypeFor,
-	fetchApps,
+	discoverApps,
 	fetchInstalls,
 	fetchTransactions,
 	toCents,
@@ -90,9 +90,11 @@ export type AppSyncSummary = {
 };
 
 /**
- * Pulls every app in the Partner organization and records it. Apps arrive with
+ * Records every app the Partner organization has billed for. Apps arrive with
  * affiliate participation off — revenue and merchant analytics start flowing
  * immediately, but an admin opts an app into the affiliate program by hand.
+ *
+ * Only apps with at least one transaction can be found; see discoverApps.
  *
  * Never overwrites the fields an admin owns (slug, listing URL, commission,
  * affiliate opt-in); only the name is refreshed from Shopify.
@@ -109,17 +111,11 @@ export async function syncApps(
 
 	try {
 		const credentials = await credentialsFor(env, account);
+		const discovered = await discoverApps(credentials);
+		seen = discovered.length;
 
-		let cursor: string | null = null;
-		let hasNextPage = true;
-
-		while (hasNextPage) {
-			const page = await fetchApps(credentials, { after: cursor });
-			hasNextPage = page.hasNextPage;
-			cursor = page.cursor;
-			seen += page.apps.length;
-
-			for (const partnerApp of page.apps) {
+		{
+			for (const partnerApp of discovered) {
 				const [existing] = await db
 					.select()
 					.from(apps)
@@ -152,8 +148,6 @@ export async function syncApps(
 				});
 				created++;
 			}
-
-			if (!page.cursor) break;
 		}
 
 		await db
@@ -273,11 +267,8 @@ export async function syncTransactions(
 
 			for (const txn of page.transactions) {
 				const result = await applyTransaction(db, txn, appsByPartnerId);
-				if (result === 'matched') matched++;
-				if (result === 'created') {
-					matched++;
-					created++;
-				}
+				if (result.matched) matched++;
+				if (result.commission) created++;
 			}
 
 			if (!page.cursor) break;
@@ -325,15 +316,23 @@ export async function syncTransactions(
 	}
 }
 
+type TransactionOutcome = {
+	/** The transaction belongs to an app we track. */
+	matched: boolean;
+	/** A new commission line was written for an attributed shop. */
+	commission: boolean;
+};
+
 async function applyTransaction(
 	db: DrizzleClient,
 	txn: PartnerTransaction,
 	appsByPartnerId: Map<string, typeof apps.$inferSelect>
-): Promise<'skipped' | 'matched' | 'created'> {
-	if (!txn.appId) return 'skipped';
+): Promise<TransactionOutcome> {
+	const skipped: TransactionOutcome = { matched: false, commission: false };
+	if (!txn.appId) return skipped;
 
 	const app = appsByPartnerId.get(txn.appId);
-	if (!app) return 'skipped';
+	if (!app) return skipped;
 
 	const shopDomain = txn.shopDomain ? normalizeShopDomain(txn.shopDomain) : null;
 	const occurredAt = new Date(txn.createdAt);
@@ -367,7 +366,7 @@ async function applyTransaction(
 		.returning();
 
 	const transaction = stored.at(0) ?? null;
-	if (!shopDomain) return transaction ? 'created' : 'matched';
+	if (!shopDomain) return { matched: true, commission: false };
 
 	const [referral] = await db
 		.select()
@@ -375,11 +374,12 @@ async function applyTransaction(
 		.where(and(eq(referrals.appId, app.id), eq(referrals.shopDomain, shopDomain)))
 		.limit(1);
 
-	if (!referral || referral.status === 'rejected') {
-		return transaction ? 'created' : 'matched';
-	}
+	// Revenue is recorded either way; only an attributed shop earns a commission.
+	if (!referral || referral.status === 'rejected') return { matched: true, commission: false };
 
-	if (referral.commissionEndsAt && occurredAt > referral.commissionEndsAt) return 'matched';
+	if (referral.commissionEndsAt && occurredAt > referral.commissionEndsAt) {
+		return { matched: true, commission: false };
+	}
 
 	const commission = await recordCommission(db, {
 		referralId: referral.id,
@@ -395,7 +395,7 @@ async function applyTransaction(
 		occurredAt
 	});
 
-	return commission ? 'created' : 'matched';
+	return { matched: true, commission: Boolean(commission) };
 }
 
 /**

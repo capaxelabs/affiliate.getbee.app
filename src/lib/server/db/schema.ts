@@ -84,7 +84,7 @@ export const partnerAccounts = sqliteTable(
 		apiTokenEncrypted: text('api_token_encrypted'),
 		/** Last 4 characters, so the UI can show which token is stored. */
 		apiTokenHint: text('api_token_hint'),
-		apiVersion: text('api_version').notNull().default('2025-01'),
+		apiVersion: text('api_version').notNull().default('2026-07'),
 		status: text('status', { enum: ['active', 'paused'] })
 			.notNull()
 			.default('active'),

@@ -108,8 +108,8 @@ Three roles, one login (email magic-code):
 - [x] Opting in requires an App Store listing URL; opting out stops new referrals
       but leaves existing ones earning
 - [x] Every affiliate surface filters on the flag, including `attributeReferral`
-- [ ] Verify the Partner API `apps` query against a live token — the failure path
-      is tested, a successful pull is not
+- [x] Verified against a live Partner account: discovery, transactions and
+      installs all pull real data
 
 ## Restricted team access
 

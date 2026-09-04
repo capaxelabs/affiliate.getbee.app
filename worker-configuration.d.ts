@@ -9,7 +9,7 @@ interface __BaseEnv_Env {
 	APP_NAME: "Bee Affiliates";
 	EMAIL_API_URL: "https://tools.capaxe.com/email";
 	EMAIL_FROM: "Bee Affiliates <affiliates@getbee.app>";
-	PARTNER_API_VERSION: "2025-01";
+	PARTNER_API_VERSION: "2026-07";
 	EMAIL_API_KEY: string;
 	PARTNER_ORG_ID: string;
 	PARTNER_API_TOKEN: string;

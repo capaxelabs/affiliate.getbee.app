@@ -216,7 +216,7 @@
 						id="apiVersion"
 						name="apiVersion"
 						value={editing?.apiVersion ?? data.defaultApiVersion}
-						placeholder="2025-01"
+						placeholder="2026-07"
 					/>
 				</div>
 			</div>

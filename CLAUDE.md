@@ -121,6 +121,16 @@ Discovery only ever writes `name`, `partnerAppId` and `partnerAccountId`; the
 fields an admin owns (`slug`, `listingUrl`, commission, `affiliateEnabled`) are
 never overwritten.
 
+**The Partner API cannot list an organization's apps.** `QueryRoot` exposes only
+`app(id:)`, `transactions`, `events`, `transaction` and `activeSubscription`, and
+the org-wide `Relationship` event carries no app reference. `discoverApps`
+therefore pages `transactions` and collects the distinct `app { id name }` it
+finds, which means an app with no transactions is invisible and has to be added
+manually. Do not "fix" this by reaching for an `apps` query — it does not exist.
+
+Partner API versions are dated and retire. An invalid one 404s with "Invalid API
+version". `publicApiVersions` on the `unstable` endpoint lists what is live.
+
 `apps.affiliateEnabled` decides participation in the affiliate program, and it is
 off for a discovered app. Analytics — revenue, installs, merchants — cover every
 app regardless. Anything affiliate-facing must filter on it: the affiliate home,

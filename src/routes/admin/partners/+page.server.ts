@@ -45,7 +45,7 @@ export const load: PageServerLoad = async (event) => {
 		unassignedApps: Number(unassigned[0]?.value ?? 0),
 		encryptionReady: encryptionConfigured(env),
 		canImportFromEnv,
-		defaultApiVersion: env?.PARTNER_API_VERSION ?? '2025-01'
+		defaultApiVersion: env?.PARTNER_API_VERSION ?? '2026-07'
 	};
 };
 
@@ -59,7 +59,7 @@ const accountSchema = z.object({
 	apiVersion: z
 		.string()
 		.trim()
-		.regex(/^\d{4}-\d{2}$/, 'API version looks like 2025-01.')
+		.regex(/^\d{4}-\d{2}$/, 'API version looks like 2026-07.')
 		.optional()
 		.or(z.literal('')),
 	apiToken: z.string().trim().max(400).optional(),
@@ -90,7 +90,7 @@ export const actions: Actions = {
 				.values({
 					name: parsed.data.name,
 					organizationId: parsed.data.organizationId,
-					apiVersion: parsed.data.apiVersion || env.PARTNER_API_VERSION || '2025-01',
+					apiVersion: parsed.data.apiVersion || env.PARTNER_API_VERSION || '2026-07',
 					apiTokenEncrypted: await encryptSecret(env, parsed.data.apiToken),
 					apiTokenHint: tokenHint(parsed.data.apiToken),
 					status: parsed.data.status
@@ -207,7 +207,7 @@ export const actions: Actions = {
 				.values({
 					name: 'Imported from environment',
 					organizationId: env.PARTNER_ORG_ID,
-					apiVersion: env.PARTNER_API_VERSION || '2025-01',
+					apiVersion: env.PARTNER_API_VERSION || '2026-07',
 					apiTokenEncrypted: await encryptSecret(env, env.PARTNER_API_TOKEN),
 					apiTokenHint: tokenHint(env.PARTNER_API_TOKEN)
 				})
