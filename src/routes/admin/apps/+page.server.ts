@@ -5,6 +5,7 @@ import { requireAdminAccess, requireOwner, appScopeFilter } from '$lib/server/sc
 import { apps, auditLog, partnerAccounts } from '$lib/server/db/schema';
 import { revenueByApp } from '$lib/server/services/stats';
 import { syncApps, syncableAccounts } from '$lib/server/services/sync';
+import { fetchListing, findListing } from '$lib/server/services/listing';
 import { lifecycleEmailStats } from '$lib/server/services/lifecycle';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -248,6 +249,46 @@ export const actions: Actions = {
 				? `${app.name} is now offered to affiliates.`
 				: `${app.name} is no longer offered to affiliates. Existing referrals keep earning.`
 		};
+	},
+
+	/** Re-reads the App Store page for an app's icon, listing URL and name. */
+	refreshListing: async (event) => {
+		const admin = await requireOwner(event);
+		const id = String((await event.request.formData()).get('id') ?? '');
+
+		const [app] = await event.locals.db.select().from(apps).where(eq(apps.id, id)).limit(1);
+		if (!app) return fail(404, { error: 'App not found.' });
+
+		const listing = app.listingUrl
+			? await fetchListing(app.listingUrl)
+			: await findListing(app.slug, app.name);
+
+		if (!listing) {
+			return fail(404, {
+				error: app.listingUrl
+					? `Could not read ${app.listingUrl}.`
+					: `No App Store listing found for "${app.slug}". Add the URL by hand.`
+			});
+		}
+
+		await event.locals.db
+			.update(apps)
+			.set({
+				listingUrl: listing.url,
+				iconUrl: listing.iconUrl ?? app.iconUrl,
+				updatedAt: new Date()
+			})
+			.where(eq(apps.id, id));
+
+		await event.locals.db.insert(auditLog).values({
+			actorUserId: admin.userId,
+			action: 'app.refresh_listing',
+			entityType: 'app',
+			entityId: id,
+			metadata: { listingUrl: listing.url }
+		});
+
+		return { success: true, message: `Listing refreshed for ${app.name}.` };
 	},
 
 	toggleStatus: async (event) => {

@@ -189,18 +189,39 @@ export async function recordUninstall(
 		uninstalledAt?: Date;
 		reason?: string | null;
 		feedback?: string | null;
+		shopName?: string | null;
 		source?: 'ingest' | 'partner_api' | 'manual';
+		/**
+		 * Create the merchant and install when we have no record of the install.
+		 * The Partner API reports churn from before our first sync, and dropping
+		 * it would leave a hole in the history.
+		 */
+		createIfMissing?: boolean;
 	}
 ) {
 	const shopDomain = normalizeShopDomain(options.shopDomain);
 	if (!shopDomain) return null;
 
-	const [row] = await db
-		.select({ install: installs, merchant: merchants })
-		.from(installs)
-		.innerJoin(merchants, eq(merchants.id, installs.merchantId))
-		.where(and(eq(installs.appId, options.appId), eq(merchants.shopDomain, shopDomain)))
-		.limit(1);
+	const find = () =>
+		db
+			.select({ install: installs, merchant: merchants })
+			.from(installs)
+			.innerJoin(merchants, eq(merchants.id, installs.merchantId))
+			.where(and(eq(installs.appId, options.appId), eq(merchants.shopDomain, shopDomain)))
+			.limit(1);
+
+	let [row] = await find();
+
+	if (!row && options.createIfMissing) {
+		await recordInstall(db, {
+			appId: options.appId,
+			profile: { shopDomain, name: options.shopName ?? null },
+			// The install predates what we can see; date it at the uninstall.
+			installedAt: options.uninstalledAt ?? new Date(),
+			source: options.source ?? 'partner_api'
+		});
+		[row] = await find();
+	}
 
 	if (!row) return null;
 

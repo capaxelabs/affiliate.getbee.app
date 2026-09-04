@@ -249,6 +249,17 @@
 							<Table.Cell>
 								{#if data.canWrite}
 									<div class="flex justify-end gap-1">
+										<form method="POST" action="?/refreshListing" use:enhance={toggle}>
+											<input type="hidden" name="id" value={app.id} />
+											<Button
+												type="submit"
+												size="sm"
+												variant="ghost"
+												title="Re-read the App Store page for the icon and listing URL"
+											>
+												Listing
+											</Button>
+										</form>
 										<Button size="sm" variant="ghost" onclick={() => openEdit(app)}>Edit</Button>
 										<form method="POST" action="?/toggleStatus" use:enhance={toggle}>
 											<input type="hidden" name="id" value={app.id} />

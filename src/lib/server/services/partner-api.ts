@@ -37,10 +37,15 @@ export type PartnerApp = {
 	name: string;
 };
 
-export type PartnerInstallEvent = {
+/** An install, uninstall or reactivation on one app. */
+export type PartnerRelationshipEvent = {
+	kind: 'installed' | 'uninstalled' | 'reactivated';
 	occurredAt: string;
 	shopDomain: string | null;
-	appId: string | null;
+	shopName: string | null;
+	/** Only present on uninstalls — Shopify's own churn reason. */
+	reason: string | null;
+	appId: string;
 };
 
 const TRANSACTIONS_QUERY = `
@@ -82,16 +87,24 @@ query AffiliateTransactions($after: String, $createdAtMin: DateTime) {
   }
 }`;
 
-const INSTALLS_QUERY = `
-query AffiliateInstalls($appId: ID!, $after: String, $occurredAtMin: DateTime) {
+const RELATIONSHIP_EVENTS_QUERY = `
+query AppRelationshipEvents($appId: ID!, $after: String, $occurredAtMin: DateTime) {
   app(id: $appId) {
-    events(first: 100, after: $after, occurredAtMin: $occurredAtMin, types: [RELATIONSHIP_INSTALLED]) {
+    events(
+      first: 100
+      after: $after
+      occurredAtMin: $occurredAtMin
+      types: [RELATIONSHIP_INSTALLED, RELATIONSHIP_UNINSTALLED, RELATIONSHIP_REACTIVATED]
+    ) {
       pageInfo { hasNextPage }
       edges {
         cursor
         node {
           occurredAt
-          ... on RelationshipInstalled { shop { myshopifyDomain } }
+          __typename
+          ... on RelationshipInstalled { shop { myshopifyDomain name } }
+          ... on RelationshipReactivated { shop { myshopifyDomain name } }
+          ... on RelationshipUninstalled { reason shop { myshopifyDomain name } }
         }
       }
     }
@@ -212,33 +225,66 @@ export async function discoverApps(
 	return [...found].map(([id, name]) => ({ id, name }));
 }
 
-type InstallsResponse = {
+type RelationshipEventsResponse = {
 	app: {
 		events: {
 			pageInfo: { hasNextPage: boolean };
-			edges: { cursor: string; node: { occurredAt: string; shop?: { myshopifyDomain: string } } }[];
+			edges: {
+				cursor: string;
+				node: {
+					occurredAt: string;
+					__typename: string;
+					reason?: string | null;
+					shop?: { myshopifyDomain: string; name: string } | null;
+				};
+			}[];
 		};
 	} | null;
 };
 
-export async function fetchInstalls(
+const RELATIONSHIP_KIND: Record<string, PartnerRelationshipEvent['kind']> = {
+	RelationshipInstalled: 'installed',
+	RelationshipUninstalled: 'uninstalled',
+	RelationshipReactivated: 'reactivated'
+};
+
+/** Installs, uninstalls and reactivations for one app, in one pass. */
+export async function fetchRelationshipEvents(
 	credentials: PartnerCredentials,
 	partnerAppId: string,
 	options: { after?: string | null; occurredAtMin?: string | null } = {}
-): Promise<{ installs: PartnerInstallEvent[]; cursor: string | null; hasNextPage: boolean }> {
-	const data = await request<InstallsResponse>(credentials, INSTALLS_QUERY, {
-		appId: partnerAppId,
-		after: options.after ?? null,
-		occurredAtMin: options.occurredAtMin ?? null
-	});
+): Promise<{
+	events: PartnerRelationshipEvent[];
+	cursor: string | null;
+	hasNextPage: boolean;
+}> {
+	const data = await request<RelationshipEventsResponse>(
+		credentials,
+		RELATIONSHIP_EVENTS_QUERY,
+		{
+			appId: partnerAppId,
+			after: options.after ?? null,
+			occurredAtMin: options.occurredAtMin ?? null
+		}
+	);
 
 	const edges = data.app?.events.edges ?? [];
+
 	return {
-		installs: edges.map(({ node }) => ({
-			occurredAt: node.occurredAt,
-			shopDomain: node.shop?.myshopifyDomain ?? null,
-			appId: partnerAppId
-		})),
+		events: edges.flatMap(({ node }) => {
+			const kind = RELATIONSHIP_KIND[node.__typename];
+			if (!kind) return [];
+			return [
+				{
+					kind,
+					occurredAt: node.occurredAt,
+					shopDomain: node.shop?.myshopifyDomain ?? null,
+					shopName: node.shop?.name ?? null,
+					reason: node.reason ?? null,
+					appId: partnerAppId
+				}
+			];
+		}),
 		cursor: edges.at(-1)?.cursor ?? null,
 		hasNextPage: data.app?.events.pageInfo.hasNextPage ?? false
 	};

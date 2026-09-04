@@ -1,0 +1,14 @@
+-- Intentionally a no-op rewrite.
+--
+-- drizzle-kit generated a full partner_accounts table rebuild here purely to
+-- change the api_version column DEFAULT from '2025-01' to '2026-07'. On D1 that
+-- rebuild fails: PRAGMA foreign_keys=OFF is not honoured across statements, so
+-- dropping the table while apps.partner_account_id and
+-- admin_scopes.partner_account_id still reference it raises
+-- "FOREIGN KEY constraint failed" (code 7500).
+--
+-- The rebuild is unnecessary anyway. Every insert into partner_accounts supplies
+-- api_version explicitly, so the column default is never read, and 0004 already
+-- corrected the existing rows. This statement is the same safety net, repeated
+-- so local and remote end up in the same place.
+UPDATE `partner_accounts` SET `api_version` = '2026-07' WHERE `api_version` = '2025-01';

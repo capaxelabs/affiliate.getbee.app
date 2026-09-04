@@ -267,7 +267,54 @@ await report('/api/track/uninstall', {
 });
 ```
 
-`app` is the slug you gave the app in the admin.
+`app` is the slug shown in the Apps table.
+
+### What comes from where
+
+| | Partner API (automatic) | Your app posting here |
+| --- | --- | --- |
+| Which shop installed / uninstalled | yes | yes |
+| When | yes | yes |
+| Shop name | yes | yes |
+| Churn reason | yes, Shopify's own picker | yes, plus free-text feedback |
+| **Merchant email** | **no** | yes |
+| Owner name, phone, country, currency, timezone, plan | no | yes |
+| Affiliate attribution (`ref`) | no | yes |
+
+`Shop` on the Partner API exposes only `id`, `name`, `myshopifyDomain` and
+`avatarUrl`. There is no email anywhere in it, so **lifecycle email and affiliate
+attribution both depend on your app posting to `/api/track/install`.** Everything
+else backfills on its own.
+
+### Shopify app side
+
+```js
+// After OAuth, with an admin access token for the shop:
+const shop = await fetch(
+  `https://${shopDomain}/admin/api/2026-07/shop.json`,
+  { headers: { 'X-Shopify-Access-Token': accessToken } }
+).then((r) => r.json()).then((d) => d.shop);
+
+await report('/api/track/install', {
+  app: 'rankflo',
+  shopDomain,
+  ref: refFromInstallRequest,          // null if there wasn't one
+  shop: {
+    name: shop.name,
+    email: shop.email,
+    ownerName: shop.shop_owner,
+    phone: shop.phone,
+    primaryDomain: shop.domain,
+    country: shop.country_code,
+    currency: shop.currency,
+    timezone: shop.iana_timezone,
+    plan: shop.plan_name
+  }
+});
+```
+
+Register `app/uninstalled` and post to `/api/track/uninstall` from its handler.
+Both endpoints are idempotent, so a retried webhook is safe.
 
 ---
 

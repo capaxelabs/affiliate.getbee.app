@@ -10,14 +10,16 @@ import {
 import { decryptSecret } from '$lib/server/crypto';
 import { recordCommission, releaseMaturedCommissions } from './commission';
 import { normalizeShopDomain } from './referral';
-import { recordInstall, upsertMerchant } from './merchant';
+import { recordInstall, recordUninstall, upsertMerchant } from './merchant';
+import { findListing } from './listing';
 import {
 	chargeTypeFor,
 	discoverApps,
-	fetchInstalls,
+	fetchRelationshipEvents,
 	fetchTransactions,
 	toCents,
 	type PartnerCredentials,
+	type PartnerRelationshipEvent,
 	type PartnerTransaction
 } from './partner-api';
 
@@ -123,6 +125,21 @@ export async function syncApps(
 					.limit(1);
 
 				if (existing) {
+					if (!existing.listingUrl || !existing.iconUrl) {
+						const listing = await findListing(existing.slug, partnerApp.name);
+						if (listing) {
+							await db
+								.update(apps)
+								.set({
+									listingUrl: existing.listingUrl ?? listing.url,
+									iconUrl: existing.iconUrl ?? listing.iconUrl,
+									updatedAt: new Date()
+								})
+								.where(eq(apps.id, existing.id));
+							updated++;
+						}
+					}
+
 					if (existing.name !== partnerApp.name || existing.partnerAccountId !== account.id) {
 						await db
 							.update(apps)
@@ -137,12 +154,17 @@ export async function syncApps(
 					continue;
 				}
 
+				const slug = await uniqueSlug(db, partnerApp.name);
+				// Icon and listing URL only exist on the public App Store page.
+				const listing = await findListing(slug, partnerApp.name);
+
 				await db.insert(apps).values({
 					name: partnerApp.name,
-					slug: await uniqueSlug(db, partnerApp.name),
+					slug,
 					partnerAppId: partnerApp.id,
 					partnerAccountId: account.id,
-					listingUrl: null,
+					listingUrl: listing?.url ?? null,
+					iconUrl: listing?.iconUrl ?? null,
 					affiliateEnabled: false,
 					source: 'partner_api'
 				});
@@ -171,7 +193,9 @@ export async function syncApps(
 async function windowStart(
 	db: DrizzleClient,
 	accountId: string,
-	kind: 'transactions' | 'installs'
+	kind: 'transactions' | 'installs',
+	/** How far back the very first run reaches. */
+	firstRunDays = 30
 ) {
 	const [last] = await db
 		.select({ startedAt: partnerSyncRuns.startedAt })
@@ -186,8 +210,7 @@ async function windowStart(
 		.orderBy(desc(partnerSyncRuns.startedAt))
 		.limit(1);
 
-	const fallback = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-	if (!last) return fallback;
+	if (!last) return new Date(Date.now() - firstRunDays * 24 * 60 * 60 * 1000);
 
 	// Overlap by a day so nothing slips between runs.
 	return new Date(last.startedAt.getTime() - 24 * 60 * 60 * 1000);
@@ -399,8 +422,11 @@ async function applyTransaction(
 }
 
 /**
- * Pulls install events for one account's apps. Records every merchant, and
- * marks matching referrals installed. It never invents attribution.
+ * Pulls install, uninstall and reactivation events for one account's apps.
+ *
+ * Records every merchant, keeps install state current, and captures Shopify's
+ * own churn reason on uninstall. Referrals that were waiting on an install get
+ * marked active; attribution is never invented here.
  */
 export async function syncInstalls(
 	db: DrizzleClient,
@@ -424,59 +450,77 @@ export async function syncInstalls(
 
 	try {
 		const credentials = await credentialsFor(env, account);
-		const occurredAtMin = (await windowStart(db, account.id, 'installs')).toISOString();
+		// Two years on the first run so churn history is not a blank slate.
+		const occurredAtMin = (await windowStart(db, account.id, 'installs', 730)).toISOString();
 
 		const tracked = (
 			await db.select().from(apps).where(eq(apps.partnerAccountId, account.id))
 		).filter((a) => a.partnerAppId);
 
 		for (const app of tracked) {
+			// Collect the whole window before applying it: a shop that installed,
+			// churned and came back must be replayed in order or it ends up in the
+			// wrong state.
+			const collected: PartnerRelationshipEvent[] = [];
 			let cursor: string | null = null;
 			let hasNextPage = true;
 
 			while (hasNextPage) {
-				const page = await fetchInstalls(credentials, app.partnerAppId!, {
+				const page = await fetchRelationshipEvents(credentials, app.partnerAppId!, {
 					after: cursor,
 					occurredAtMin
 				});
 				hasNextPage = page.hasNextPage;
 				cursor = page.cursor;
-				seen += page.installs.length;
+				collected.push(...page.events);
+				if (!page.cursor) break;
+			}
 
-				for (const install of page.installs) {
-					const shopDomain = install.shopDomain && normalizeShopDomain(install.shopDomain);
-					if (!shopDomain) continue;
+			seen += collected.length;
+			collected.sort((a, b) => a.occurredAt.localeCompare(b.occurredAt));
 
-					const installedAt = new Date(install.occurredAt);
+			for (const event of collected) {
+				const shopDomain = event.shopDomain && normalizeShopDomain(event.shopDomain);
+				if (!shopDomain) continue;
 
-					// Track the merchant even when no affiliate referred them.
-					await recordInstall(db, {
+				const occurredAt = new Date(event.occurredAt);
+
+				if (event.kind === 'uninstalled') {
+					const result = await recordUninstall(db, {
 						appId: app.id,
-						profile: { shopDomain },
-						installedAt,
-						source: 'partner_api'
+						shopDomain,
+						shopName: event.shopName,
+						uninstalledAt: occurredAt,
+						reason: event.reason,
+						source: 'partner_api',
+						createIfMissing: true
 					});
-
-					const updated = await db
-						.update(referrals)
-						.set({
-							status: 'active',
-							installedAt: sql`coalesce(${referrals.installedAt}, ${Math.floor(installedAt.getTime() / 1000)})`,
-							updatedAt: new Date()
-						})
-						.where(
-							and(
-								eq(referrals.appId, app.id),
-								eq(referrals.shopDomain, shopDomain),
-								eq(referrals.status, 'pending')
-							)
-						)
-						.returning({ id: referrals.id });
-
-					matched += updated.length;
+					if (result) matched++;
+					continue;
 				}
 
-				if (!page.cursor) break;
+				await recordInstall(db, {
+					appId: app.id,
+					profile: { shopDomain, name: event.shopName },
+					installedAt: occurredAt,
+					source: 'partner_api'
+				});
+				matched++;
+
+				await db
+					.update(referrals)
+					.set({
+						status: 'active',
+						installedAt: sql`coalesce(${referrals.installedAt}, ${Math.floor(occurredAt.getTime() / 1000)})`,
+						updatedAt: new Date()
+					})
+					.where(
+						and(
+							eq(referrals.appId, app.id),
+							eq(referrals.shopDomain, shopDomain),
+							eq(referrals.status, 'pending')
+						)
+					);
 			}
 		}
 

@@ -181,6 +181,20 @@ production before the code that needs it is pushed:
 npm run db:generate && npm run db:migrate:remote && git push
 ```
 
+**Read what drizzle-kit generates before trusting it.** Two of its migrations for
+this repo were wrong:
+
+- `0003` copied columns from the old table that did not exist there yet, and
+  would have failed on any database with rows in it.
+- `0005` rebuilt `partner_accounts` just to change a column default. D1 does not
+  honour `PRAGMA foreign_keys=OFF` across statements, so dropping a table other
+  tables reference fails with "FOREIGN KEY constraint failed" (code 7500).
+
+SQLite cannot alter a column in place, so drizzle reaches for a table rebuild for
+things as small as a default change. On D1, a rebuild of a referenced table will
+not apply. Prefer a hand-written `UPDATE`, and test any rebuild against a scratch
+sqlite3 database seeded with production-shaped rows first.
+
 Never hand someone a "run npm run deploy" instruction for this repo — pushing is
 the deploy.
 
