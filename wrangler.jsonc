@@ -1,0 +1,52 @@
+{
+	"$schema": "./node_modules/wrangler/config-schema.json",
+	"name": "affiliate-getbee-apps",
+	"account_id": "81cac75fe318d80f4344481afc4799ac",
+	"compatibility_date": "2026-01-10",
+	"compatibility_flags": ["nodejs_als", "nodejs_compat"],
+	"main": ".svelte-kit/cloudflare/_worker.js",
+	"assets": {
+		"binding": "ASSETS",
+		"directory": ".svelte-kit/cloudflare"
+	},
+	"observability": {
+		"logs": { "enabled": true, "invocation_logs": true }
+	},
+	"workers_dev": true,
+	"preview_urls": true,
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "bee-affiliates",
+			// TODO: create with `wrangler d1 create bee-affiliates` and paste the id here
+			"database_id": "REPLACE_WITH_D1_DATABASE_ID",
+			"migrations_dir": "drizzle"
+		}
+	],
+	"kv_namespaces": [
+		{
+			"binding": "KV",
+			// TODO: create with `wrangler kv namespace create KV` and paste the id here
+			"id": "REPLACE_WITH_KV_NAMESPACE_ID"
+		}
+	],
+	"vars": {
+		"NODE_ENV": "production",
+		"APP_URL": "https://affiliate.getbee.app",
+		"APP_NAME": "Bee Affiliates",
+		"EMAIL_API_URL": "https://tools.capaxe.com/email",
+		"EMAIL_FROM": "Bee Affiliates <affiliates@getbee.app>",
+		// Default Partner API version for newly connected accounts.
+		"PARTNER_API_VERSION": "2025-01"
+	}
+	// Secrets (set with `wrangler secret put <NAME>`):
+	//   EMAIL_API_KEY     — tools.capaxe.com/email api key
+	//   PARTNER_ORG_ID    — Shopify Partner organization id
+	//   PARTNER_API_TOKEN — Shopify Partner API access token
+	//   CRON_SECRET       — bearer token for POST /api/cron/sync
+	//   ENCRYPTION_KEY    — passphrase used to encrypt Partner API tokens in D1
+	//
+	// Scheduling: adapter-cloudflare only exports a fetch handler, so there is no
+	// scheduled() hook. Point any scheduler at POST /api/cron/sync with
+	// `Authorization: Bearer $CRON_SECRET` to run the Partner API sync hourly.
+}

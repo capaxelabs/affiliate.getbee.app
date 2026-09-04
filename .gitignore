@@ -1,0 +1,11 @@
+node_modules
+/.svelte-kit
+/build
+/dist
+.env
+.env.*
+!.env.example
+.wrangler
+.DS_Store
+.dev.vars
+.playwright-mcp

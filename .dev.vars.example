@@ -1,0 +1,7 @@
+# Local-only secrets for `npm run dev`. Copy to .dev.vars.
+# Leave EMAIL_API_KEY empty to print sign-in codes to the console instead of emailing.
+EMAIL_API_KEY=
+PARTNER_ORG_ID=
+PARTNER_API_TOKEN=
+CRON_SECRET=local-dev-secret
+ENCRYPTION_KEY=

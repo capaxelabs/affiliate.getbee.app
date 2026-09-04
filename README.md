@@ -1,39 +1,32 @@
-# sv
+# Bee Affiliates
 
-Everything you need to build a Svelte project, powered by [`sv`](https://github.com/sveltejs/cli).
+Affiliate program and developer tooling for the Bee family of Shopify apps.
 
-## Creating a project
+- **Affiliates** get links per app, referral tracking, commissions, payouts and reports.
+- **Admins** manage several apps, approve affiliates, review claims, and run payouts.
 
-If you're seeing this, you've probably already done this step. Congrats!
+One login for both: an emailed 6-digit code. Role decides the destination.
 
-```sh
-# create a new project in the current directory
-npx sv create
+## Setup
 
-# create a new project in my-app
-npx sv create my-app
-```
-
-## Developing
-
-Once you've created a project and installed dependencies with `npm install` (or `pnpm install` or `yarn`), start a development server:
-
-```sh
+```bash
+npm install
+wrangler d1 create bee-affiliates      # paste the id into wrangler.jsonc
+wrangler kv namespace create KV        # paste the id into wrangler.jsonc
+npm run db:generate
+npm run db:migrate:local
 npm run dev
-
-# or start the server and open the app in a new browser tab
-npm run dev -- --open
 ```
 
-## Building
+Then make yourself an admin:
 
-To create a production version of your app:
-
-```sh
-npm run build
+```bash
+wrangler d1 execute bee-affiliates --local \
+  --command "update users set role = 'admin' where email = 'you@example.com'"
 ```
 
-You can preview the production build with `npm run preview`.
+## Stack
 
-> To deploy your app, you may need to install an [adapter](https://svelte.dev/docs/kit/adapters) for your target environment.
-# affiliate.getbee.app
+SvelteKit 5 · shadcn-svelte · Tailwind v4 · Cloudflare Workers · D1 + Drizzle · KV
+
+See [CLAUDE.md](CLAUDE.md) for architecture and the rules the code relies on.
