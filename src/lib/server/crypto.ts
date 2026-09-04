@@ -2,7 +2,7 @@ import { encodeBase64, decodeBase64 } from '@oslojs/encoding';
 import { sha256 } from '@oslojs/crypto/sha2';
 
 /**
- * AES-GCM for the Partner API tokens we have to keep in D1. The key is derived
+ * AES-GCM for the Partner Access Tokens we have to keep in D1. The key is derived
  * from the ENCRYPTION_KEY worker secret, so a database dump on its own is not
  * enough to use the tokens.
  */

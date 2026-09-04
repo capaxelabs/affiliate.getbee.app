@@ -97,7 +97,7 @@ export const actions: Actions = {
 		const result = await runFullSync(event.locals.db, event.platform!.env, 'manual');
 
 		if (!result.accounts) {
-			return { success: false, message: 'No connected accounts with a stored API token.' };
+			return { success: false, message: 'No connected accounts with a stored Partner Access Token.' };
 		}
 
 		const failed = [...result.installs, ...result.transactions].filter((r) => r.status === 'failed');

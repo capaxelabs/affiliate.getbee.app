@@ -53,8 +53,8 @@ const accountSchema = z.object({
 	organizationId: z
 		.string()
 		.trim()
-		.min(1, 'Organization id is required.')
-		.regex(/^\d+$/, 'Organization id is the number from your Partner dashboard URL.'),
+		.min(1, 'Partner Id is required.')
+		.regex(/^\d+$/, 'Partner Id is the number from your Partner dashboard URL.'),
 	apiVersion: z
 		.string()
 		.trim()
@@ -73,7 +73,7 @@ export const actions: Actions = {
 		if (!parsed.success) return fail(400, { error: parsed.error.issues[0].message });
 
 		if (!parsed.data.apiToken) {
-			return fail(400, { error: 'An API token is required to connect an account.' });
+			return fail(400, { error: 'A Partner Access Token is required to connect an account.' });
 		}
 
 		const [clash] = await event.locals.db
@@ -81,7 +81,7 @@ export const actions: Actions = {
 			.from(partnerAccounts)
 			.where(eq(partnerAccounts.organizationId, parsed.data.organizationId))
 			.limit(1);
-		if (clash) return fail(409, { error: 'That organization is already connected.' });
+		if (clash) return fail(409, { error: 'That Partner Id is already connected.' });
 
 		try {
 			const [created] = await event.locals.db

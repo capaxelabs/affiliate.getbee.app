@@ -48,7 +48,7 @@ D1 + Drizzle ORM · KV.
 src/lib/server/
   auth.ts              magic-code login, sessions
   scope.ts             admin/staff access resolution and app scoping
-  crypto.ts            AES-GCM for Partner API tokens stored in D1
+  crypto.ts            AES-GCM for Partner Access Tokens stored in D1
   email.ts             transactional email via tools.capaxe.com/email
   guards.ts            requireUser / requireAdmin / requireAffiliate
   db/schema.ts         every table
@@ -116,7 +116,8 @@ Grants live in `admin_scopes`: a row names either one app, or a partner account
 ## Partner accounts
 
 Several Shopify Partner organizations can be connected at once. `partner_accounts`
-holds the org id and an AES-GCM encrypted API token; `apps.partnerAccountId` says
+holds the Partner Id and an AES-GCM encrypted Partner Access Token;
+`apps.partnerAccountId` says
 which org an app lives under, and the sync runs once per account with that
 account's own credentials. Tokens are never sent to a browser — the UI shows only
 a masked hint and lets you replace them.

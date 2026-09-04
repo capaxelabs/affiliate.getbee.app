@@ -43,7 +43,7 @@ export async function syncableAccounts(db: DrizzleClient, partnerAccountId?: str
 
 async function credentialsFor(env: Env, account: Account): Promise<PartnerCredentials> {
 	if (!account.apiTokenEncrypted) {
-		throw new Error(`No API token stored for ${account.name}.`);
+		throw new Error(`No Partner Access Token stored for ${account.name}.`);
 	}
 	return {
 		organizationId: account.organizationId,

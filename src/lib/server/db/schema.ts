@@ -69,7 +69,7 @@ export const loginCodes = sqliteTable(
 
 /**
  * A Shopify Partner organization. Several can be connected at once; each app
- * belongs to exactly one. The API token is encrypted at rest and never leaves
+ * belongs to exactly one. The Partner Access Token is encrypted at rest and never leaves
  * the server.
  */
 export const partnerAccounts = sqliteTable(

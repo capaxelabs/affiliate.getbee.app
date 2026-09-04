@@ -69,7 +69,8 @@
 <div class="space-y-5 px-5 pb-10 sm:px-8">
 	{#if !data.encryptionReady}
 		<div class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-			<code class="font-mono">ENCRYPTION_KEY</code> is not set, so API tokens cannot be stored. Run
+			<code class="font-mono">ENCRYPTION_KEY</code> is not set, so Partner Access Tokens cannot be
+			stored. Run
 			<code class="font-mono">wrangler secret put ENCRYPTION_KEY</code> first.
 		</div>
 	{/if}
@@ -117,8 +118,8 @@
 				<Table.Header>
 					<Table.Row>
 						<Table.Head>Account</Table.Head>
-						<Table.Head>Organization</Table.Head>
-						<Table.Head>API token</Table.Head>
+						<Table.Head>Partner Id</Table.Head>
+						<Table.Head>Partner Access Token</Table.Head>
 						<Table.Head>Version</Table.Head>
 						<Table.Head>Status</Table.Head>
 						<Table.Head class="text-right">Apps</Table.Head>
@@ -177,8 +178,9 @@
 		<Dialog.Header>
 			<Dialog.Title>{editing ? `Edit ${editing.name}` : 'Connect partner account'}</Dialog.Title>
 			<Dialog.Description>
-				The organization id is the number in your Partner dashboard URL. Create the API token under
-				Settings → Partner API clients with read access to app events and transactions.
+				The Partner Id is the number in your Partner dashboard URL. Create the Partner Access
+				Token under Settings → Partner API clients with read access to app events and
+				transactions.
 			</Dialog.Description>
 		</Dialog.Header>
 
@@ -199,7 +201,7 @@
 
 			<div class="grid gap-4 sm:grid-cols-2">
 				<div class="space-y-2">
-					<Label for="organizationId">Organization id</Label>
+					<Label for="organizationId">Partner Id</Label>
 					<Input
 						id="organizationId"
 						name="organizationId"
@@ -221,7 +223,7 @@
 
 			<div class="space-y-2">
 				<Label for="apiToken">
-					API token
+					Partner Access Token
 					{#if editing?.hasToken}
 						<span class="text-muted-foreground">(leave blank to keep {editing.apiTokenHint})</span>
 					{/if}

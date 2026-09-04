@@ -25,7 +25,7 @@ D1 + Drizzle ORM
 - Node 20+
 - A Cloudflare account (the free plan is enough to start)
 - A domain on Cloudflare, if you want a custom hostname
-- A Shopify Partner organization and a Partner API token, to sync revenue
+- A Shopify Partner account and a Partner Access Token, to sync revenue
 
 ### 1. Clone and install
 
@@ -85,12 +85,12 @@ npx wrangler secret put EMAIL_API_KEY
 
 | Secret | What it does | Required? |
 | --- | --- | --- |
-| `ENCRYPTION_KEY` | Encrypts the Shopify Partner API tokens stored in D1 | Before you can connect a Partner account |
+| `ENCRYPTION_KEY` | Encrypts the Partner Access Tokens stored in D1 | Before you can connect a Partner account |
 | `CRON_SECRET` | Signs install/uninstall calls from your apps and guards `/api/cron/sync` | Before ingest or scheduled sync work |
 | `EMAIL_API_KEY` | Key for your email endpoint | Optional — without it, email is logged to the worker console instead of sent |
 
 > **`ENCRYPTION_KEY` cannot be rotated casually.** Changing it makes every stored
-> Partner API token undecryptable and they all have to be re-entered. Set it once
+> Partner Access Token undecryptable and they all have to be re-entered. Set it once
 > and keep a copy somewhere safe.
 
 ### 5. Deploy
@@ -153,10 +153,10 @@ npx wrangler d1 execute bee-affiliates --local \
 
 In the admin: **Partner accounts → Connect account**.
 
-- **Organization id** — the number in your Partner dashboard URL,
+- **Partner Id** — the number in your Partner dashboard URL,
   `partners.shopify.com/<id>`
-- **API token** — Partner dashboard → Settings → Partner API clients. It needs
-  read access to app events and transactions.
+- **Partner Access Token** — Partner dashboard → Settings → Partner API clients.
+  It needs read access to app events and transactions.
 
 Add several accounts if your apps live under different organizations. Each app is
 then linked to one account on the **Apps** page, along with its Partner app id
