@@ -1,5 +1,8 @@
 <script lang="ts">
+	import { goto } from '$app/navigation';
 	import * as Card from '$lib/components/ui/card';
+	import * as Select from '$lib/components/ui/select';
+	import { Input } from '$lib/components/ui/input';
 	import * as Table from '$lib/components/ui/table';
 	import { Button } from '$lib/components/ui/button';
 	import PageHeader from '$lib/components/page-header.svelte';
@@ -9,6 +12,7 @@
 	import Pagination from '$lib/components/pagination.svelte';
 	import EmptyState from '$lib/components/empty-state.svelte';
 	import ArrowLeftIcon from '@lucide/svelte/icons/arrow-left';
+	import SearchIcon from '@lucide/svelte/icons/search';
 	import ExternalLinkIcon from '@lucide/svelte/icons/external-link';
 	import StoreIcon from '@lucide/svelte/icons/store';
 	import { money, shortDate, humanize, plural } from '$lib/format';
@@ -30,6 +34,52 @@
 
 	const installsTotal = $derived(data.lifecycleSeries.reduce((sum, p) => sum + p.installed, 0));
 	const churnTotal = $derived(data.lifecycleSeries.reduce((sum, p) => sum + p.uninstalled, 0));
+
+	// Derived from the URL rather than held locally, so going Back moves the
+	// controls too instead of leaving them showing a filter that is no longer on.
+	const status = $derived(data.filters.status || 'all');
+	const country = $derived(data.filters.country || 'all');
+	const plan = $derived(data.filters.plan || 'all');
+	const attribution = $derived(data.filters.attribution || 'all');
+
+	// The one exception: the text box has to stay responsive while typing, so it
+	// keeps its own copy and re-syncs whenever the loaded data changes.
+	let search = $state(data.filters.search);
+	$effect(() => {
+		search = data.filters.search;
+	});
+
+	const statusLabel = $derived(
+		status === 'all' ? 'Any status' : status === 'installed' ? 'Installed' : 'Uninstalled'
+	);
+	const countryLabel = $derived(country === 'all' ? 'Any country' : country);
+	const planLabel = $derived(plan === 'all' ? 'Any plan' : plan);
+	const attributionLabel = $derived(
+		attribution === 'all' ? 'Any source' : attribution === 'referred' ? 'Referred' : 'Organic'
+	);
+
+	/** Changing a filter always returns to page 1 — page 3 of the old set is meaningless. */
+	function apply(next: Record<string, string>) {
+		const url = new URL(window.location.href);
+		for (const [key, value] of Object.entries(next)) {
+			if (value && value !== 'all') url.searchParams.set(key, value);
+			else url.searchParams.delete(key);
+		}
+		url.searchParams.delete('page');
+		goto(url, { keepFocus: true, replaceState: true, noScroll: true });
+	}
+
+	let timer: ReturnType<typeof setTimeout>;
+	function onSearch(value: string) {
+		search = value;
+		clearTimeout(timer);
+		timer = setTimeout(() => apply({ q: value }), 250);
+	}
+
+	function clearFilters() {
+		search = '';
+		apply({ q: '', status: '', country: '', plan: '', referred: '' });
+	}
 </script>
 
 <svelte:head><title>{app.name} · Admin</title></svelte:head>
@@ -125,14 +175,100 @@
 	<Card.Root class="gap-0 overflow-hidden p-0">
 		<Card.Header class="border-b px-5 py-4">
 			<Card.Title class="text-base">Merchants</Card.Title>
-			<Card.Description>Everyone who has installed {app.name}, newest first.</Card.Description>
+			<Card.Description>
+				{#if data.filters.any}
+					{plural(data.merchantCount, 'match', 'matches')} of {plural(s.totalInstalls, 'merchant')}.
+				{:else}
+					Everyone who has installed {app.name}, newest first.
+				{/if}
+			</Card.Description>
 		</Card.Header>
+
+		<div class="flex flex-wrap items-center gap-2 border-b px-5 py-3">
+			<div class="relative min-w-56 flex-1">
+				<SearchIcon
+					class="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground"
+				/>
+				<Input
+					value={search}
+					oninput={(e) => onSearch(e.currentTarget.value)}
+					placeholder="Shop, name, email or owner"
+					class="pl-8"
+				/>
+			</div>
+
+			<Select.Root
+				type="single"
+				value={status}
+				onValueChange={(v) => apply({ status: v })}
+			>
+				<Select.Trigger class="w-36">{statusLabel}</Select.Trigger>
+				<Select.Content>
+					<Select.Item value="all" label="Any status">Any status</Select.Item>
+					<Select.Item value="installed" label="Installed">Installed</Select.Item>
+					<Select.Item value="uninstalled" label="Uninstalled">Uninstalled</Select.Item>
+				</Select.Content>
+			</Select.Root>
+
+			{#if data.countries.length > 1}
+				<Select.Root
+					type="single"
+					value={country}
+					onValueChange={(v) => apply({ country: v })}
+				>
+					<Select.Trigger class="w-36">{countryLabel}</Select.Trigger>
+					<Select.Content>
+						<Select.Item value="all" label="Any country">Any country</Select.Item>
+						{#each data.countries as code (code)}
+							<Select.Item value={code} label={code}>{code}</Select.Item>
+						{/each}
+					</Select.Content>
+				</Select.Root>
+			{/if}
+
+			{#if data.plans.length > 1}
+				<Select.Root
+					type="single"
+					value={plan}
+					onValueChange={(v) => apply({ plan: v })}
+				>
+					<Select.Trigger class="w-36">{planLabel}</Select.Trigger>
+					<Select.Content>
+						<Select.Item value="all" label="Any plan">Any plan</Select.Item>
+						{#each data.plans as name (name)}
+							<Select.Item value={name} label={name}>{name}</Select.Item>
+						{/each}
+					</Select.Content>
+				</Select.Root>
+			{/if}
+
+			{#if data.canViewAffiliates}
+				<Select.Root
+					type="single"
+					value={attribution}
+					onValueChange={(v) => apply({ referred: v })}
+				>
+					<Select.Trigger class="w-36">{attributionLabel}</Select.Trigger>
+					<Select.Content>
+						<Select.Item value="all" label="Any source">Any source</Select.Item>
+						<Select.Item value="referred" label="Referred">Referred</Select.Item>
+						<Select.Item value="organic" label="Organic">Organic</Select.Item>
+					</Select.Content>
+				</Select.Root>
+			{/if}
+
+			{#if data.filters.any}
+				<Button variant="ghost" size="sm" onclick={clearFilters}>Clear</Button>
+			{/if}
+		</div>
 
 		{#if data.merchants.length === 0}
 			<EmptyState
 				icon={StoreIcon}
-				title="No merchants yet"
-				description="Installs appear here once the app reports one, or the Partner sync finds a billed shop."
+				title={data.filters.any ? 'No merchants match' : 'No merchants yet'}
+				description={data.filters.any
+					? 'Try a different search or clear the filters.'
+					: 'Installs appear here once the app reports one, or the Partner sync finds a billed shop.'}
 			/>
 		{:else}
 			<div class="overflow-x-auto">

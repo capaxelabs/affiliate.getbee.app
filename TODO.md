@@ -147,6 +147,9 @@ Three roles, one login (email magic-code):
 - [x] Every merchant who installed it, newest first, paginated at 25
 - [x] Installs/uninstalls come from `install_events`, so a shop that left and
       returned still counts in the month it first arrived
+- [x] Merchant filters: search, status, country, plan and referred/organic,
+      all combinable and reflected in the URL
+- [x] Filter options come from the app's own merchants, so none returns nothing
 - [x] Staff outside an app's scope get a 404, not a 403
 
 ## Blocking real use
@@ -162,7 +165,6 @@ Three roles, one login (email magic-code):
 ## Next
 
 - [ ] Merchant detail page (timeline of install events, revenue, emails sent)
-- [ ] Filter and search the merchant list on the app detail page
 - [ ] Let staff export the app analytics they can see (CSV)
 - [ ] Per-app staff notes / annotations on revenue dips
 - [ ] Structured churn reasons instead of free-text, so they can be charted
