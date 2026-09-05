@@ -1,7 +1,7 @@
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import type { DrizzleClient } from '$lib/server/db';
 import { apps, partnerAccounts } from '$lib/server/db/schema';
-import { findListing } from './listing';
+import { fetchListing, findListing } from './listing';
 
 /** "Kaching Bundles & Upsells" -> "kaching-bundles-upsells" */
 export function slugify(name: string) {
@@ -207,8 +207,12 @@ export async function findOrRegisterApp(
 			.limit(1);
 		if (taken) partnerAppId = null;
 	}
+	// A supplied listing URL is trusted over guessing the handle, but the icon
+	// still only exists on the page itself. Reading it was skipped here, so any
+	// app that sent its own listingUrl registered without an icon and, being
+	// invisible to the Partner sync, never got one later.
 	const listing = input.listingUrl
-		? { url: input.listingUrl, iconUrl: null }
+		? ((await fetchListing(input.listingUrl)) ?? { url: input.listingUrl, iconUrl: null })
 		: await findListing(slug, input.name);
 
 	const [created] = await db
