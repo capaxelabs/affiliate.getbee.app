@@ -152,7 +152,7 @@ export const apps = sqliteTable(
 	},
 	(t) => [
 		uniqueIndex('apps_slug_idx').on(t.slug),
-		index('apps_partner_idx').on(t.partnerAppId),
+		uniqueIndex('apps_partner_idx').on(t.partnerAppId),
 		index('apps_partner_account_idx').on(t.partnerAccountId)
 	]
 );

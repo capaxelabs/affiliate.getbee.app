@@ -82,7 +82,17 @@ export async function findOrRegisterApp(
 	if (bySlug) {
 		// Backfill identifiers the app has since learned about itself.
 		const patch: Record<string, unknown> = {};
-		if (input.partnerAppId && !bySlug.partnerAppId) patch.partnerAppId = input.partnerAppId;
+
+		if (input.partnerAppId && !bySlug.partnerAppId) {
+			// Another record may already own this Partner app; claiming it twice
+			// would split its revenue across both.
+			const [taken] = await db
+				.select({ id: apps.id })
+				.from(apps)
+				.where(eq(apps.partnerAppId, input.partnerAppId))
+				.limit(1);
+			if (!taken) patch.partnerAppId = input.partnerAppId;
+		}
 		if (input.listingUrl && !bySlug.listingUrl) patch.listingUrl = input.listingUrl;
 
 		if (input.partnerId && !bySlug.partnerAccountId) {
@@ -118,6 +128,17 @@ export async function findOrRegisterApp(
 	}
 
 	const account = input.partnerId ? await accountForPartnerId(db, input.partnerId) : null;
+
+	// Same guard on the insert path.
+	let partnerAppId = input.partnerAppId ?? null;
+	if (partnerAppId) {
+		const [taken] = await db
+			.select({ id: apps.id })
+			.from(apps)
+			.where(eq(apps.partnerAppId, partnerAppId))
+			.limit(1);
+		if (taken) partnerAppId = null;
+	}
 	const listing = input.listingUrl
 		? { url: input.listingUrl, iconUrl: null }
 		: await findListing(slug, input.name);
@@ -127,7 +148,7 @@ export async function findOrRegisterApp(
 		.values({
 			name: input.name.trim(),
 			slug: await uniqueSlug(db, input.name, slug),
-			partnerAppId: input.partnerAppId ?? null,
+			partnerAppId,
 			partnerAccountId: account?.id ?? null,
 			listingUrl: listing?.url ?? null,
 			iconUrl: listing && 'iconUrl' in listing ? (listing.iconUrl ?? null) : null,
@@ -139,11 +160,36 @@ export async function findOrRegisterApp(
 	return { app: created, created: true };
 }
 
+/**
+ * The connected account for a Partner organization id.
+ *
+ * When the organization is not connected yet, records a placeholder so the admin
+ * sees exactly which org to add a token for, instead of the app silently having
+ * no account and never syncing. The placeholder is paused and tokenless, and
+ * `syncableAccounts` requires both an active status and a stored token, so it is
+ * inert until someone finishes connecting it.
+ */
 async function accountForPartnerId(db: DrizzleClient, partnerId: string) {
+	const organizationId = partnerId.trim();
+	if (!organizationId) return null;
+
 	const [account] = await db
 		.select()
 		.from(partnerAccounts)
-		.where(eq(partnerAccounts.organizationId, partnerId.trim()))
+		.where(eq(partnerAccounts.organizationId, organizationId))
 		.limit(1);
-	return account ?? null;
+	if (account) return account;
+
+	const [placeholder] = await db
+		.insert(partnerAccounts)
+		.values({
+			name: `Partner ${organizationId}`,
+			organizationId,
+			status: 'paused',
+			lastSyncError: 'Reported by an app webhook. Add a Partner Access Token to start syncing.'
+		})
+		.onConflictDoNothing({ target: partnerAccounts.organizationId })
+		.returning();
+
+	return placeholder ?? null;
 }

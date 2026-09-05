@@ -43,6 +43,13 @@
       "when": 1788515606244,
       "tag": "0005_black_firestar",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1788570306345,
+      "tag": "0006_volatile_wendigo",
+      "breakpoints": true
     }
   ]
 }

@@ -269,6 +269,86 @@ await report('/api/track/uninstall', {
 
 `app` is the slug shown in the Apps table.
 
+### Send the same fields every time
+
+Have each app post the identity fields on **every** install. Then an app that is
+not on the books yet adds itself, and one that is simply confirms what we know —
+no per-app setup, no ordering to remember.
+
+If the `partnerId` belongs to a Partner organization that is not connected yet, a
+**placeholder account appears** under Partner accounts, paused and tokenless, so
+you can see exactly which org needs a Partner Access Token. It is skipped by the
+sync until you add one, so nothing breaks in the meantime.
+
+Dropped into a SvelteKit Shopify app whose `StoreService` already fetches the
+shop (as `shopify-app-bee-ai-seo` does), the reporter is:
+
+```ts
+// src/lib/server/affiliates.ts
+import { createHmac } from 'node:crypto';
+
+const BASE = 'https://affiliate.getbee.app';
+
+// Identity of this app. The only per-app edit.
+const APP = {
+	app: 'bee-ai-seo',
+	appName: 'Bee AI SEO',
+	partnerId: '3975838',
+	partnerAppId: 'gid://partners/App/…'
+};
+
+async function report(path: string, payload: Record<string, unknown>, secret: string) {
+	const body = JSON.stringify({ ...APP, ...payload });
+	try {
+		await fetch(`${BASE}${path}`, {
+			method: 'POST',
+			headers: {
+				'content-type': 'application/json',
+				'x-bee-signature': createHmac('sha256', secret).update(body).digest('hex')
+			},
+			body
+		});
+	} catch (error) {
+		// Never let reporting fail an install or a webhook.
+		console.error('affiliates report failed', error);
+	}
+}
+
+/** Call from initializeStore, with the store row you just upserted. */
+export function reportInstall(store: {
+	shopDomain: string;
+	shopName: string | null;
+	shopOwnerEmail: string | null;
+	shopOwnerName: string | null;
+	shopPlan: string | null;
+	shopCountry: string | null;
+	shopCurrency: string | null;
+	shopTimezone: string | null;
+}, secret: string, ref?: string | null) {
+	return report('/api/track/install', {
+		shopDomain: store.shopDomain,
+		ref: ref ?? null,
+		shop: {
+			name: store.shopName,
+			email: store.shopOwnerEmail,
+			ownerName: store.shopOwnerName,
+			country: store.shopCountry,
+			currency: store.shopCurrency,
+			timezone: store.shopTimezone,
+			plan: store.shopPlan
+		}
+	}, secret);
+}
+
+/** Call from the app/uninstalled webhook, beside markAsUninstalled. */
+export function reportUninstall(shopDomain: string, secret: string) {
+	return report('/api/track/uninstall', { shopDomain }, secret);
+}
+```
+
+`shopOwnerEmail` is the field that matters most — it is the one thing the Partner
+API cannot give you, and lifecycle email depends on it.
+
 ### Apps can register themselves
 
 Include `appName` and an app we have never seen is created on the spot, so a new
