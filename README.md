@@ -357,14 +357,25 @@ first install:
 
 ```js
 await report('/api/track/install', {
-  app: 'rankflo',                              // becomes the slug
+  app: 'rankflo',                              // handle, used in affiliate links
   appName: 'RankFlo',                          // required only to register
-  partnerId: '3975838',                        // optional, links it to an account
-  partnerAppId: 'gid://partners/App/292818255873', // optional, matches revenue sooner
+  apiKey: process.env.SHOPIFY_API_KEY,         // stable id — send it always
+  partnerId: '3975838',                        // links it to a Partner account
+  partnerAppId: 'gid://partners/App/292818255873', // matches revenue sooner
   shopDomain,
   shop: { /* ... */ }
 });
 ```
+
+An app is resolved by **`apiKey`, then `partnerAppId`, then the handle** — most
+stable first. App Store handles and our slug can both be renamed, so matching on
+the handle alone would register a duplicate the day you rename something. The
+`apiKey` is your app's OAuth client id (`SHOPIFY_API_KEY`); Shopify exposes the
+same value as `App.apiKey`, so discovery records it too and the two sides join on
+it without you configuring anything.
+
+Renaming the slug still breaks affiliate links already in circulation, since they
+are `/r/{code}/{slug}`. Renaming is safe for ingest, not for links.
 
 Registered apps arrive with **Affiliate off**, same as discovered ones. Without
 `appName` an unknown slug is rejected, so a typo cannot litter the app list.

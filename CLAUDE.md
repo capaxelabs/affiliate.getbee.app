@@ -121,6 +121,13 @@ Discovery only ever writes `name`, `partnerAppId` and `partnerAccountId`; the
 fields an admin owns (`slug`, `listingUrl`, commission, `affiliateEnabled`) are
 never overwritten.
 
+Apps are resolved by `apiKey` → `partnerAppId` → `slug`, most stable first.
+`apps.apiKey` is the OAuth client id: the app knows it as `SHOPIFY_API_KEY` and
+Shopify returns the same value as `App.apiKey`, so both sides join on it without
+configuration. Matching on slug first would register a duplicate the moment an
+App Store handle or our slug is renamed — do not reorder these. Empty identifier
+strings are normalised to NULL, or two of them collide on the unique indexes.
+
 Apps also register themselves: `/api/track/install` with an `appName` creates the
 record via `findOrRegisterApp`. That covers apps with no billing history, which
 discovery cannot see. Such a row has no `partnerAppId`, so `syncApps` first tries
@@ -254,3 +261,47 @@ is what you want locally.
 `PARTNER_ORG_ID` / `PARTNER_API_TOKEN` are legacy single-account vars. The partner
 accounts page offers a one-click import while they are still set; after importing,
 delete them.
+
+<!-- gitnexus:start -->
+# GitNexus — Code Intelligence
+
+This project is indexed by GitNexus as **affiliate.getbee.app** (982 symbols, 2015 relationships, 64 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+
+> Index stale? Run `node .gitnexus/run.cjs analyze` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? `npx gitnexus analyze` (npm 11 crash → `npm i -g gitnexus`; #1939).
+
+## Always Do
+
+- **MUST run impact analysis before editing any symbol.** Before modifying a function, class, or method, run `impact({target: "symbolName", direction: "upstream"})` and report the blast radius (direct callers, affected processes, risk level) to the user.
+- **MUST run `detect_changes()` before committing** to verify your changes only affect expected symbols and execution flows. For regression review, compare against the default branch: `detect_changes({scope: "compare", base_ref: "main"})`.
+- **MUST warn the user** if impact analysis returns HIGH or CRITICAL risk before proceeding with edits.
+- When exploring unfamiliar code, use `query({query: "concept"})` to find execution flows instead of grepping. It returns process-grouped results ranked by relevance.
+- When you need full context on a specific symbol — callers, callees, which execution flows it participates in — use `context({name: "symbolName"})`.
+
+## Never Do
+
+- NEVER edit a function, class, or method without first running `impact` on it.
+- NEVER ignore HIGH or CRITICAL risk warnings from impact analysis.
+- NEVER rename symbols with find-and-replace — use `rename` which understands the call graph.
+- NEVER commit changes without running `detect_changes()` to check affected scope.
+
+## Resources
+
+| Resource | Use for |
+|----------|---------|
+| `gitnexus://repo/affiliate.getbee.app/context` | Codebase overview, check index freshness |
+| `gitnexus://repo/affiliate.getbee.app/clusters` | All functional areas |
+| `gitnexus://repo/affiliate.getbee.app/processes` | All execution flows |
+| `gitnexus://repo/affiliate.getbee.app/process/{name}` | Step-by-step execution trace |
+
+## CLI
+
+| Task | Read this skill file |
+|------|---------------------|
+| Understand architecture / "How does X work?" | `.claude/skills/gitnexus/gitnexus-exploring/SKILL.md` |
+| Blast radius / "What breaks if I change X?" | `.claude/skills/gitnexus/gitnexus-impact-analysis/SKILL.md` |
+| Trace bugs / "Why is X failing?" | `.claude/skills/gitnexus/gitnexus-debugging/SKILL.md` |
+| Rename / extract / split / refactor | `.claude/skills/gitnexus/gitnexus-refactoring/SKILL.md` |
+| Tools, resources, schema reference | `.claude/skills/gitnexus/gitnexus-guide/SKILL.md` |
+| Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
+
+<!-- gitnexus:end -->

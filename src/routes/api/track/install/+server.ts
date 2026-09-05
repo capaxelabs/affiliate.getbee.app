@@ -31,6 +31,7 @@ import type { RequestHandler } from './$types';
  *     "appName": "RankFlo",                    // registers the app if unknown
  *     "partnerId": "3975838",                  // optional, links it to an account
  *     "partnerAppId": "gid://partners/App/1",  // optional, matches revenue sooner
+ *     "apiKey": "a40fc46e…",                   // SHOPIFY_API_KEY, survives renames
  *     "installedAt": "2026-09-04T10:00:00Z",   // optional
  *     "plan": "pro",                            // optional
  *     "shop": {                                 // optional, all fields optional
@@ -48,6 +49,8 @@ const bodySchema = z.object({
 	partnerId: z.string().trim().max(40).optional(),
 	/** gid://partners/App/... when the app knows it. Lets revenue match sooner. */
 	partnerAppId: z.string().trim().max(120).optional(),
+	/** The app's SHOPIFY_API_KEY. Stable across renames — send it always. */
+	apiKey: z.string().trim().max(64).optional(),
 	listingUrl: z.string().trim().url().optional(),
 	shopDomain: z.string().min(1),
 	ref: z.string().min(4).max(24).optional().nullable(),
@@ -88,6 +91,7 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 		name: payload.appName ?? '',
 		partnerId: payload.partnerId,
 		partnerAppId: payload.partnerAppId,
+		apiKey: payload.apiKey,
 		listingUrl: payload.listingUrl
 	});
 

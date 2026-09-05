@@ -49,6 +49,11 @@ export async function findAdoptableApp(db: DrizzleClient, name: string) {
 export type RegisterInput = {
 	slug: string;
 	name: string;
+	/**
+	 * The app's OAuth client id (SHOPIFY_API_KEY). The most stable identifier we
+	 * can be given: App Store handles and our own slug can both be renamed.
+	 */
+	apiKey?: string | null;
 	/** Shopify Partner organization id, so the app lands under the right account. */
 	partnerId?: string | null;
 	/** gid://partners/App/... when the app knows it. */
@@ -78,20 +83,51 @@ export async function findOrRegisterApp(
 ): Promise<RegisterResult | null> {
 	const slug = slugify(input.slug);
 
-	const [bySlug] = await db.select().from(apps).where(eq(apps.slug, slug)).limit(1);
+	// Empty strings are not NULL: two of them would collide on the unique index,
+	// and an empty key must never match an existing row.
+	const apiKey = input.apiKey?.trim() || null;
+	const partnerAppIdInput = input.partnerAppId?.trim() || null;
+
+	// Resolve by the most stable identifier available. Matching on the slug first
+	// would register a duplicate the moment an app handle is renamed.
+	let existing: typeof apps.$inferSelect | undefined;
+
+	if (apiKey) {
+		[existing] = await db.select().from(apps).where(eq(apps.apiKey, apiKey)).limit(1);
+	}
+	if (!existing && partnerAppIdInput) {
+		[existing] = await db
+			.select()
+			.from(apps)
+			.where(eq(apps.partnerAppId, partnerAppIdInput))
+			.limit(1);
+	}
+	if (!existing) {
+		[existing] = await db.select().from(apps).where(eq(apps.slug, slug)).limit(1);
+	}
+
+	const bySlug = existing;
 	if (bySlug) {
 		// Backfill identifiers the app has since learned about itself.
 		const patch: Record<string, unknown> = {};
 
-		if (input.partnerAppId && !bySlug.partnerAppId) {
+		if (partnerAppIdInput && !bySlug.partnerAppId) {
 			// Another record may already own this Partner app; claiming it twice
 			// would split its revenue across both.
 			const [taken] = await db
 				.select({ id: apps.id })
 				.from(apps)
-				.where(eq(apps.partnerAppId, input.partnerAppId))
+				.where(eq(apps.partnerAppId, partnerAppIdInput))
 				.limit(1);
-			if (!taken) patch.partnerAppId = input.partnerAppId;
+			if (!taken) patch.partnerAppId = partnerAppIdInput;
+		}
+		if (apiKey && !bySlug.apiKey) {
+			const [taken] = await db
+				.select({ id: apps.id })
+				.from(apps)
+				.where(eq(apps.apiKey, apiKey))
+				.limit(1);
+			if (!taken) patch.apiKey = apiKey;
 		}
 		if (input.listingUrl && !bySlug.listingUrl) patch.listingUrl = input.listingUrl;
 
@@ -117,20 +153,10 @@ export async function findOrRegisterApp(
 	// the app list. The caller has to supply a name to mean it.
 	if (!input.name?.trim()) return null;
 
-	// Same app under a different slug, already known by Partner app id.
-	if (input.partnerAppId) {
-		const [byPartnerId] = await db
-			.select()
-			.from(apps)
-			.where(eq(apps.partnerAppId, input.partnerAppId))
-			.limit(1);
-		if (byPartnerId) return { app: byPartnerId, created: false };
-	}
-
 	const account = input.partnerId ? await accountForPartnerId(db, input.partnerId) : null;
 
 	// Same guard on the insert path.
-	let partnerAppId = input.partnerAppId ?? null;
+	let partnerAppId = partnerAppIdInput;
 	if (partnerAppId) {
 		const [taken] = await db
 			.select({ id: apps.id })
@@ -149,6 +175,7 @@ export async function findOrRegisterApp(
 			name: input.name.trim(),
 			slug: await uniqueSlug(db, input.name, slug),
 			partnerAppId,
+			apiKey,
 			partnerAccountId: account?.id ?? null,
 			listingUrl: listing?.url ?? null,
 			iconUrl: listing && 'iconUrl' in listing ? (listing.iconUrl ?? null) : null,

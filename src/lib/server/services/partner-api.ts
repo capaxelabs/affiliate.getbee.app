@@ -35,6 +35,8 @@ export type PartnerTransaction = {
 export type PartnerApp = {
 	id: string;
 	name: string;
+	/** OAuth client id. Stable across renames, unlike the App Store handle. */
+	apiKey?: string | null;
 };
 
 /** An install, uninstall or reactivation on one app. */
@@ -109,6 +111,11 @@ query AppRelationshipEvents($appId: ID!, $after: String, $occurredAtMin: DateTim
       }
     }
   }
+}`;
+
+const APP_QUERY = `
+query PartnerApp($id: ID!) {
+  app(id: $id) { id name apiKey }
 }`;
 
 async function request<T>(
@@ -288,6 +295,19 @@ export async function fetchRelationshipEvents(
 		cursor: edges.at(-1)?.cursor ?? null,
 		hasNextPage: data.app?.events.pageInfo.hasNextPage ?? false
 	};
+}
+
+/** One app by its Partner gid, including the OAuth client id. */
+export async function fetchApp(
+	credentials: PartnerCredentials,
+	partnerAppId: string
+): Promise<PartnerApp | null> {
+	const data = await request<{ app: { id: string; name: string; apiKey: string | null } | null }>(
+		credentials,
+		APP_QUERY,
+		{ id: partnerAppId }
+	);
+	return data.app ? { id: data.app.id, name: data.app.name, apiKey: data.app.apiKey } : null;
 }
 
 /** Partner amounts are decimal strings like "29.00". */

@@ -16,6 +16,7 @@ import { findAdoptableApp, uniqueSlug } from './app-registry';
 import {
 	chargeTypeFor,
 	discoverApps,
+	fetchApp,
 	fetchRelationshipEvents,
 	fetchTransactions,
 	toCents,
@@ -119,6 +120,26 @@ export async function syncApps(
 				}
 
 				if (existing) {
+					// The OAuth client id is what a webhook resolves by, so make sure
+					// we hold it even for apps discovered before this existed.
+					if (!existing.apiKey) {
+						const detail = await fetchApp(credentials, partnerApp.id).catch(() => null);
+						if (detail?.apiKey) {
+							const [clash] = await db
+								.select({ id: apps.id })
+								.from(apps)
+								.where(eq(apps.apiKey, detail.apiKey))
+								.limit(1);
+							if (!clash) {
+								await db
+									.update(apps)
+									.set({ apiKey: detail.apiKey, updatedAt: new Date() })
+									.where(eq(apps.id, existing.id));
+								updated++;
+							}
+						}
+					}
+
 					if (!existing.listingUrl || !existing.iconUrl) {
 						const listing = await findListing(existing.slug, partnerApp.name);
 						if (listing) {
@@ -148,6 +169,7 @@ export async function syncApps(
 					continue;
 				}
 
+				const detail = await fetchApp(credentials, partnerApp.id).catch(() => null);
 				const slug = await uniqueSlug(db, partnerApp.name);
 				// Icon and listing URL only exist on the public App Store page.
 				const listing = await findListing(slug, partnerApp.name);
@@ -156,6 +178,7 @@ export async function syncApps(
 					name: partnerApp.name,
 					slug,
 					partnerAppId: partnerApp.id,
+					apiKey: detail?.apiKey ?? null,
 					partnerAccountId: account.id,
 					listingUrl: listing?.url ?? null,
 					iconUrl: listing?.iconUrl ?? null,

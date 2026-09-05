@@ -130,6 +130,13 @@ export const apps = sqliteTable(
 		}),
 		/** Shopify Partner API app id, used to match transactions. */
 		partnerAppId: text('partner_app_id'),
+		/**
+		 * The app's OAuth client id — what Shopify calls the API key, and what the
+		 * app knows about itself as SHOPIFY_API_KEY. Unlike the slug or the App
+		 * Store handle it never changes, so it is the identifier a webhook should
+		 * be resolved by.
+		 */
+		apiKey: text('api_key'),
 		/** Default commission in basis points. 2000 = 20%. */
 		commissionBps: integer('commission_bps').notNull().default(2000),
 		/** null = lifetime, otherwise commissions stop after N months. */
@@ -153,6 +160,7 @@ export const apps = sqliteTable(
 	(t) => [
 		uniqueIndex('apps_slug_idx').on(t.slug),
 		uniqueIndex('apps_partner_idx').on(t.partnerAppId),
+		uniqueIndex('apps_api_key_idx').on(t.apiKey),
 		index('apps_partner_account_idx').on(t.partnerAccountId)
 	]
 );
