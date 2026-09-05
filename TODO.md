@@ -124,14 +124,35 @@ Three roles, one login (email magic-code):
 
 - [ ] On OAuth install, POST to `/api/track/install` with the captured `ref` plus
       a `shop` object (name, email, ownerName, country, currency, plan). Signed
-      with `X-Bee-Signature` HMAC-SHA256 of the raw body using `CRON_SECRET`.
+      with `X-Bee-Signature` HMAC-SHA256 of the raw body using the ingest key
+      from Admin → Apps, set in the app as `AFFILIATES_SECRET`.
       Without this, no merchant data, no lifecycle email, and every referral has
       to go through a manual claim.
 - [ ] On `app/uninstalled`, POST to `/api/track/uninstall`. Optionally POST again
       later with `reason` / `feedback` when the merchant replies to the survey.
 
+## Ingest key
+
+- [x] One key for every app and both track endpoints, stored encrypted in
+      `settings` so the admin can read it back — a worker secret cannot be
+- [x] Generate / reveal / regenerate from Admin → Apps, owner-only and audited
+- [x] `/api/cron/sync` accepts it as a bearer token
+- [x] `CRON_SECRET` still verifies, so anything already configured keeps working
+
+## App detail page
+
+- [x] `/admin/apps/[id]` — revenue, installs, churn, contactable and referral
+      stats for one app
+- [x] Four 12-month charts: gross, net, installs, uninstalls
+- [x] Every merchant who installed it, newest first, paginated at 25
+- [x] Installs/uninstalls come from `install_events`, so a shop that left and
+      returned still counts in the month it first arrived
+- [x] Staff outside an app's scope get a 404, not a 403
+
 ## Blocking real use
 
+- [ ] Generate the ingest key in Admin → Apps and set it as `AFFILIATES_SECRET`
+      in each Bee app. Until then the apps fall back to `CRON_SECRET`.
 - [ ] Turn **Affiliate** on for the apps you want promoted. Nothing affiliate-side
       works until at least one is on — no links, no referrals, no commissions.
 - [ ] Add the reporter to RankFlo and Shootflo. Without it the 42 merchants have
@@ -141,6 +162,7 @@ Three roles, one login (email magic-code):
 ## Next
 
 - [ ] Merchant detail page (timeline of install events, revenue, emails sent)
+- [ ] Filter and search the merchant list on the app detail page
 - [ ] Let staff export the app analytics they can see (CSV)
 - [ ] Per-app staff notes / annotations on revenue dips
 - [ ] Structured churn reasons instead of free-text, so they can be charted
