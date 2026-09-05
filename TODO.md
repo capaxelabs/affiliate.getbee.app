@@ -28,9 +28,9 @@ Three roles, one login (email magic-code):
 - [x] `hooks.server.ts` session load + role guards for `/app` and `/admin`
 - [x] Email sender (tools.capaxe.com/email) with login-code + lifecycle templates
 - [x] Generate migration `0000` and apply it to local D1
-- [ ] Create the D1 database and paste `database_id` into wrangler.jsonc
+- [x] Create the D1 database and paste `database_id` into wrangler.jsonc
       (`npx wrangler d1 create bee-affiliates`) — the only placeholder left
-- [ ] Set the three secrets: `ENCRYPTION_KEY`, `CRON_SECRET`, `EMAIL_API_KEY`
+- [x] Set the three secrets: `ENCRYPTION_KEY`, `CRON_SECRET`, `EMAIL_API_KEY`
 
 ## Affiliate portal (`/app`)
 
@@ -62,7 +62,8 @@ Three roles, one login (email magic-code):
 - [x] Shopify Partner API client (transactions + app installs, GraphQL)
 - [x] Matcher: shop domain → click / claim → referral → commission lines
 - [x] `POST /api/cron/sync` entry point for a scheduler (bearer-guarded)
-- [ ] Add real Partner API credentials as secrets (`PARTNER_API_TOKEN`, `PARTNER_ORG_ID`)
+- [x] Connect the Partner account (credentials live in the database now, encrypted,
+      not as worker secrets)
 
 ## Merchants & revenue
 
@@ -83,7 +84,7 @@ Three roles, one login (email magic-code):
 - [x] Re-checks toggle and install state at send time (no welcome to someone who
       already left; no offboarding to someone who reinstalled)
 - [x] Drained by `POST /api/cron/sync` and by a button on Admin → Partner sync
-- [ ] Set `EMAIL_API_KEY` so these actually send (they log to console without it)
+- [x] Set `EMAIL_API_KEY` so these actually send
 
 ## Multiple partner accounts
 
@@ -93,8 +94,7 @@ Three roles, one login (email magic-code):
       resume window and error recorded on the account
 - [x] Admin → Partner accounts: connect, edit, rotate token, pause, disconnect
 - [x] One-click import of the legacy `PARTNER_ORG_ID` / `PARTNER_API_TOKEN` env vars
-- [ ] Set `ENCRYPTION_KEY` (`wrangler secret put ENCRYPTION_KEY`) before connecting
-      accounts in production
+- [x] Set `ENCRYPTION_KEY` before connecting accounts in production
 - [ ] After importing, delete the `PARTNER_*` worker secrets
 
 ## App discovery and affiliate opt-in
@@ -129,6 +129,14 @@ Three roles, one login (email magic-code):
       to go through a manual claim.
 - [ ] On `app/uninstalled`, POST to `/api/track/uninstall`. Optionally POST again
       later with `reason` / `feedback` when the merchant replies to the survey.
+
+## Blocking real use
+
+- [ ] Turn **Affiliate** on for the apps you want promoted. Nothing affiliate-side
+      works until at least one is on — no links, no referrals, no commissions.
+- [ ] Add the reporter to RankFlo and Shootflo. Without it the 42 merchants have
+      no email address, so lifecycle mail cannot send and every referral needs a
+      manual claim.
 
 ## Next
 
