@@ -50,6 +50,13 @@
       "when": 1788570306345,
       "tag": "0006_volatile_wendigo",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1788571502852,
+      "tag": "0007_fresh_mongoose",
+      "breakpoints": true
     }
   ]
 }

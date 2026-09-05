@@ -1,4 +1,4 @@
-import { and, eq, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import type { DrizzleClient } from '$lib/server/db';
 import { apps, installEvents, installs, merchants } from '$lib/server/db/schema';
 import { normalizeShopDomain } from './referral';
@@ -80,6 +80,89 @@ export async function upsertMerchant(db: DrizzleClient, profile: MerchantProfile
 	return updated;
 }
 
+
+/**
+ * Records one lifecycle event and rebuilds the install row from the full trail.
+ *
+ * Installs and uninstalls arrive from two independent places — the Shopify
+ * Partner API and each app's own webhook — in no guaranteed order, and the
+ * Partner sync deliberately re-reads an overlapping window. Mutating the install
+ * row on arrival made the result depend on who got there first: replaying a
+ * history the webhook had already summarised inflated `installCount`, and a
+ * re-read uninstall appended a duplicate event every run.
+ *
+ * So the events are the truth and the row is derived. Writing the same event
+ * twice is a no-op, and the outcome does not depend on arrival order.
+ */
+async function applyLifecycleEvent(
+	db: DrizzleClient,
+	options: {
+		installId: string;
+		appId: string;
+		merchantId: string;
+		type: 'installed' | 'uninstalled' | 'feedback' | 'plan_changed';
+		occurredAt: Date;
+		source: 'ingest' | 'partner_api' | 'manual';
+		metadata?: Record<string, unknown> | null;
+	}
+) {
+	const inserted = await db
+		.insert(installEvents)
+		.values({
+			installId: options.installId,
+			appId: options.appId,
+			merchantId: options.merchantId,
+			type: options.type,
+			source: options.source,
+			metadata: options.metadata ?? null,
+			occurredAt: options.occurredAt
+		})
+		.onConflictDoNothing({
+			target: [installEvents.installId, installEvents.type, installEvents.occurredAt]
+		})
+		.returning();
+
+	const isNew = inserted.length > 0;
+
+	// Only install and uninstall move the state; feedback and plan changes do not.
+	if (options.type === 'installed' || options.type === 'uninstalled') {
+		await rebuildInstallState(db, options.installId);
+	}
+
+	return isNew;
+}
+
+/** Derives status, timestamps and install count from the event trail. */
+async function rebuildInstallState(db: DrizzleClient, installId: string) {
+	const events = await db
+		.select({ type: installEvents.type, occurredAt: installEvents.occurredAt })
+		.from(installEvents)
+		.where(
+			and(
+				eq(installEvents.installId, installId),
+				inArray(installEvents.type, ['installed', 'uninstalled'])
+			)
+		)
+		.orderBy(asc(installEvents.occurredAt));
+
+	if (!events.length) return;
+
+	const installs_ = events.filter((e) => e.type === 'installed');
+	const uninstalls = events.filter((e) => e.type === 'uninstalled');
+	const latest = events[events.length - 1];
+
+	await db
+		.update(installs)
+		.set({
+			status: latest.type === 'uninstalled' ? 'uninstalled' : 'installed',
+			installedAt: installs_.at(-1)?.occurredAt ?? latest.occurredAt,
+			uninstalledAt: latest.type === 'uninstalled' ? (uninstalls.at(-1)?.occurredAt ?? null) : null,
+			installCount: Math.max(1, installs_.length),
+			updatedAt: new Date()
+		})
+		.where(eq(installs.id, installId));
+}
+
 export type RecordInstallResult = {
 	merchantId: string;
 	installId: string;
@@ -115,7 +198,6 @@ export async function recordInstall(
 
 	let installId: string;
 	let firstInstall = false;
-	let reinstall = false;
 
 	if (!existing) {
 		const [created] = await db
@@ -133,36 +215,30 @@ export async function recordInstall(
 		firstInstall = true;
 	} else {
 		installId = existing.id;
-		reinstall = existing.status === 'uninstalled';
 
-		await db
-			.update(installs)
-			.set({
-				status: 'installed',
-				installedAt: reinstall ? installedAt : existing.installedAt,
-				uninstalledAt: null,
-				uninstallReason: null,
-				uninstallFeedback: null,
-				installCount: reinstall ? existing.installCount + 1 : existing.installCount,
-				plan: options.plan ?? existing.plan,
-				referralId: options.referralId ?? existing.referralId,
-				updatedAt: new Date()
-			})
-			.where(eq(installs.id, existing.id));
+		// Only fields the caller actually supplied; the projection owns the rest.
+		const patch: Record<string, unknown> = { updatedAt: new Date() };
+		if (options.plan) patch.plan = options.plan;
+		if (options.referralId && !existing.referralId) patch.referralId = options.referralId;
+		if (Object.keys(patch).length > 1) {
+			await db.update(installs).set(patch).where(eq(installs.id, installId));
+		}
 	}
 
-	// A repeat webhook for an install we already have is not an event.
-	if (firstInstall || reinstall) {
-		await db.insert(installEvents).values({
-			installId,
-			appId: options.appId,
-			merchantId: merchant.id,
-			type: reinstall ? 'reinstalled' : 'installed',
-			source: options.source ?? 'ingest',
-			metadata: { plan: options.plan ?? null },
-			occurredAt: installedAt
-		});
+	const wasUninstalled = existing?.status === 'uninstalled';
 
+	const recorded = await applyLifecycleEvent(db, {
+		installId,
+		appId: options.appId,
+		merchantId: merchant.id,
+		type: 'installed',
+		occurredAt: installedAt,
+		source: options.source ?? 'ingest',
+		metadata: { plan: options.plan ?? null }
+	});
+
+	// Only queue a welcome for a genuinely new install we have not seen before.
+	if (recorded && (firstInstall || wasUninstalled)) {
 		const [app] = await db.select().from(apps).where(eq(apps.id, options.appId)).limit(1);
 		if (app?.welcomeEmailEnabled && merchant.email) {
 			await queueLifecycleEmail(db, {
@@ -176,6 +252,8 @@ export async function recordInstall(
 			});
 		}
 	}
+
+	const reinstall = wasUninstalled;
 
 	return { merchantId: merchant.id, installId, firstInstall, reinstall };
 }
@@ -226,30 +304,45 @@ export async function recordUninstall(
 	if (!row) return null;
 
 	const uninstalledAt = options.uninstalledAt ?? new Date();
+	const source = options.source ?? 'ingest';
 	const alreadyUninstalled = row.install.status === 'uninstalled';
 
-	await db
-		.update(installs)
-		.set({
-			status: 'uninstalled',
-			uninstalledAt,
-			uninstallReason: options.reason ?? row.install.uninstallReason,
-			uninstallFeedback: options.feedback ?? row.install.uninstallFeedback,
-			updatedAt: new Date()
-		})
-		.where(eq(installs.id, row.install.id));
+	// The app's own exit survey beats Shopify's dropdown, whichever lands first:
+	// it is your question, and it carries free text alongside it.
+	const reasonPatch: Record<string, unknown> = { updatedAt: new Date() };
+	if (options.reason && (source === 'ingest' || !row.install.uninstallReason)) {
+		reasonPatch.uninstallReason = options.reason;
+	}
+	if (options.feedback) reasonPatch.uninstallFeedback = options.feedback;
 
-	await db.insert(installEvents).values({
+	if (Object.keys(reasonPatch).length > 1) {
+		await db.update(installs).set(reasonPatch).where(eq(installs.id, row.install.id));
+	}
+
+	const recorded = await applyLifecycleEvent(db, {
 		installId: row.install.id,
 		appId: options.appId,
 		merchantId: row.merchant.id,
-		type: alreadyUninstalled ? 'feedback' : 'uninstalled',
-		source: options.source ?? 'ingest',
-		metadata: { reason: options.reason ?? null, feedback: options.feedback ?? null },
-		occurredAt: uninstalledAt
+		type: 'uninstalled',
+		occurredAt: uninstalledAt,
+		source,
+		metadata: { reason: options.reason ?? null, feedback: options.feedback ?? null }
 	});
 
-	if (!alreadyUninstalled) {
+	// Feedback arriving after the fact is its own event, not another uninstall.
+	if (!recorded && options.feedback) {
+		await applyLifecycleEvent(db, {
+			installId: row.install.id,
+			appId: options.appId,
+			merchantId: row.merchant.id,
+			type: 'feedback',
+			occurredAt: new Date(),
+			source,
+			metadata: { reason: options.reason ?? null, feedback: options.feedback }
+		});
+	}
+
+	if (recorded && !alreadyUninstalled) {
 		const [app] = await db.select().from(apps).where(eq(apps.id, options.appId)).limit(1);
 		if (app?.offboardEmailEnabled && row.merchant.email) {
 			await queueLifecycleEmail(db, {

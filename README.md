@@ -373,6 +373,27 @@ If the app later bills someone, the Partner sync **adopts** the existing record
 by name rather than creating a duplicate, filling in the Partner app id it now
 knows. Passing `partnerAppId` up front skips the guesswork.
 
+### Two sources, one truth
+
+Installs and uninstalls arrive from **both** the Partner API and your app's
+webhook. That is deliberate — neither alone is enough. The Partner API has no
+merchant email and no affiliate ref; your app cannot see revenue or the history
+from before it started reporting.
+
+They cannot corrupt each other, because the **event trail is the source of truth
+and the install row is derived from it**. Writing the same event twice is a
+no-op, and the result does not depend on which source arrives first: a full
+re-sync over a history your webhook already reported changes nothing.
+
+Where the two genuinely disagree, precedence is explicit:
+
+| Field | Wins |
+| --- | --- |
+| Uninstall reason | Your app's own exit survey, over Shopify's dropdown |
+| Merchant profile | Whoever supplied a value; a sparse Partner record never blanks a rich one |
+| Install / uninstall timing | Earliest recorded event for that moment |
+| Affiliate attribution | Only your app can supply it |
+
 ### What comes from where
 
 | | Partner API (automatic) | Your app posting here |
@@ -383,6 +404,8 @@ knows. Passing `partnerAppId` up front skips the guesswork.
 | Churn reason | yes, Shopify's own picker | yes, plus free-text feedback |
 | **Merchant email** | **no** | yes |
 | Registering an app that has never billed anyone | no | yes |
+| History from before your app started reporting | yes | no |
+| Real-time (welcome email within the hour) | no, daily sync | yes |
 | Owner name, phone, country, currency, timezone, plan | no | yes |
 | Affiliate attribution (`ref`) | no | yes |
 

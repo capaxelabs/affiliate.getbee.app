@@ -237,8 +237,13 @@ export const installEvents = sqliteTable(
 		merchantId: text('merchant_id')
 			.notNull()
 			.references(() => merchants.id, { onDelete: 'cascade' }),
+		/**
+		 * A reinstall is just an `installed` after an `uninstalled`, so it needs no
+		 * type of its own — deriving it keeps one event per moment per kind, which
+		 * is what makes replaying a history idempotent.
+		 */
 		type: text('type', {
-			enum: ['installed', 'reinstalled', 'uninstalled', 'plan_changed', 'feedback']
+			enum: ['installed', 'uninstalled', 'plan_changed', 'feedback']
 		}).notNull(),
 		source: text('source', { enum: ['ingest', 'partner_api', 'manual'] })
 			.notNull()
@@ -249,7 +254,10 @@ export const installEvents = sqliteTable(
 	},
 	(t) => [
 		index('install_events_install_idx').on(t.installId),
-		index('install_events_occurred_idx').on(t.occurredAt)
+		index('install_events_occurred_idx').on(t.occurredAt),
+		// The Partner API and the app's own webhook both report installs and
+		// uninstalls. This is what stops the same moment being counted twice.
+		uniqueIndex('install_events_unique_idx').on(t.installId, t.type, t.occurredAt)
 	]
 );
 

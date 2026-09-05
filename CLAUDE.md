@@ -166,6 +166,27 @@ every stored token undecryptable, so they would all need re-entering.
 2. **Claim** — the affiliate submits a shop domain, an admin approves it.
 3. **Manual** — an admin attributes a shop directly from `/admin/referrals`.
 
+## Two writers, one truth
+
+Installs and uninstalls arrive from the Partner API **and** from each app's
+webhook, in no guaranteed order, and the Partner sync deliberately re-reads an
+overlapping window. Mutating the install row on arrival made the outcome depend
+on who got there first — replaying a history the webhook had summarised inflated
+`installCount`, and a re-read uninstall appended an event on every run.
+
+So `install_events` is the truth and `installs` is a projection of it:
+
+- `applyLifecycleEvent` inserts with `onConflictDoNothing` on
+  `(install_id, type, occurred_at)`, then `rebuildInstallState` derives status,
+  timestamps and `installCount` from the whole trail.
+- A reinstall is an `installed` after an `uninstalled`. There is deliberately no
+  `reinstalled` type: two types for one moment defeated the dedup key.
+- Uninstall reason precedence is explicit — a reason from `ingest` overwrites,
+  one from `partner_api` only fills a blank. Your own exit survey beats
+  Shopify's dropdown.
+
+Never go back to mutating the install row directly from a webhook handler.
+
 ## Merchant lifecycle
 
 Each Bee app posts to `/api/track/install` and `/api/track/uninstall`, both signed
