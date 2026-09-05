@@ -360,6 +360,103 @@ export async function recordUninstall(
 	return { installId: row.install.id, merchantId: row.merchant.id, alreadyUninstalled };
 }
 
+
+/**
+ * Applies a whole shop's lifecycle history in one pass.
+ *
+ * The per-event path costs roughly eight D1 calls, and on Workers every one of
+ * those is a subrequest against a hard per-request cap. A two-year backfill of a
+ * couple of hundred events blew through it and the request was killed mid-run.
+ * Grouping by shop makes the cost scale with shops rather than events: one
+ * merchant upsert, one multi-row event insert, one state rebuild.
+ */
+export async function recordLifecycleHistory(
+	db: DrizzleClient,
+	options: {
+		appId: string;
+		profile: MerchantProfile;
+		events: {
+			type: 'installed' | 'uninstalled';
+			occurredAt: Date;
+			reason?: string | null;
+		}[];
+		source?: 'ingest' | 'partner_api' | 'manual';
+	}
+): Promise<{ merchantId: string; installId: string; inserted: number } | null> {
+	if (!options.events.length) return null;
+
+	const ordered = [...options.events].sort(
+		(a, b) => a.occurredAt.getTime() - b.occurredAt.getTime()
+	);
+	const first = ordered[0];
+	const last = ordered[ordered.length - 1];
+
+	const merchant = await upsertMerchant(db, options.profile, last.occurredAt);
+	if (!merchant) return null;
+
+	const [existing] = await db
+		.select()
+		.from(installs)
+		.where(and(eq(installs.appId, options.appId), eq(installs.merchantId, merchant.id)))
+		.limit(1);
+
+	let installId: string;
+	if (existing) {
+		installId = existing.id;
+	} else {
+		const [created] = await db
+			.insert(installs)
+			.values({
+				appId: options.appId,
+				merchantId: merchant.id,
+				status: last.type === 'uninstalled' ? 'uninstalled' : 'installed',
+				installedAt: first.occurredAt
+			})
+			.returning();
+		installId = created.id;
+	}
+
+	const rows = ordered.map((event) => ({
+		installId,
+		appId: options.appId,
+		merchantId: merchant.id,
+		type: event.type,
+		source: options.source ?? 'partner_api',
+		metadata: event.reason ? { reason: event.reason } : null,
+		occurredAt: event.occurredAt
+	}));
+
+	// D1 caps bound parameters per query at 100, and each row binds eight. A shop
+	// that has cycled dozens of times would blow past that in one statement, so
+	// insert in chunks. The unique key still drops anything we already had.
+	const ROWS_PER_INSERT = 10;
+	let inserted = 0;
+
+	for (let i = 0; i < rows.length; i += ROWS_PER_INSERT) {
+		const chunk = await db
+			.insert(installEvents)
+			.values(rows.slice(i, i + ROWS_PER_INSERT))
+			.onConflictDoNothing({
+				target: [installEvents.installId, installEvents.type, installEvents.occurredAt]
+			})
+			.returning({ id: installEvents.id });
+		inserted += chunk.length;
+	}
+
+	// Shopify's churn reason only fills a blank; the app's own survey wins.
+	const latestReason = [...ordered].reverse().find((e) => e.type === 'uninstalled' && e.reason);
+	if (latestReason?.reason && !existing?.uninstallReason) {
+		await db
+			.update(installs)
+			.set({ uninstallReason: latestReason.reason, updatedAt: new Date() })
+			.where(eq(installs.id, installId));
+	}
+
+	await rebuildInstallState(db, installId);
+
+	return { merchantId: merchant.id, installId, inserted };
+}
+
 /** Links an install to an affiliate referral once attribution is known. */
 export async function linkInstallToReferral(
 	db: DrizzleClient,

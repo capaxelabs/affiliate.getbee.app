@@ -173,6 +173,26 @@ every stored token undecryptable, so they would all need re-entering.
 2. **Claim** — the affiliate submits a shop domain, an admin approves it.
 3. **Manual** — an admin attributes a shop directly from `/admin/referrals`.
 
+## Workers limits shape the sync
+
+Two caps bite here and neither shows up locally, where D1 is a file rather than a
+service:
+
+- **Subrequests per request.** Every D1 call counts. The original loop cost about
+  eight per lifecycle event, so a two-year backfill was killed mid-run at roughly
+  a hundred events. `syncInstalls` therefore groups events by shop and calls
+  `recordLifecycleHistory` once per shop — cost scales with shops, not events.
+- **100 bound parameters per D1 query.** An eight-column row binds eight, so a
+  shop that has cycled dozens of times overflows a single multi-row insert. Events
+  are inserted in chunks of ten.
+
+A request that is cut off leaves its `partner_sync_runs` row on `running`
+forever, which showed in the admin as a spinner that never resolved.
+`failStaleRuns` closes anything older than fifteen minutes and runs at the start
+of every full sync.
+
+Keep per-record work out of per-event loops here.
+
 ## Two writers, one truth
 
 Installs and uninstalls arrive from the Partner API **and** from each app's

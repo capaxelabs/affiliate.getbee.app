@@ -1,4 +1,4 @@
-import { and, desc, eq, isNotNull, sql } from 'drizzle-orm';
+import { and, desc, eq, isNotNull, lt, sql } from 'drizzle-orm';
 import type { DrizzleClient } from '$lib/server/db';
 import {
 	apps,
@@ -10,7 +10,7 @@ import {
 import { decryptSecret } from '$lib/server/crypto';
 import { recordCommission, releaseMaturedCommissions } from './commission';
 import { normalizeShopDomain } from './referral';
-import { recordInstall, recordUninstall, upsertMerchant } from './merchant';
+import { recordInstall, recordLifecycleHistory, upsertMerchant } from './merchant';
 import { findListing } from './listing';
 import { findAdoptableApp, uniqueSlug } from './app-registry';
 import {
@@ -38,6 +38,26 @@ export type SyncSummary = {
 	commissionsCreated: number;
 	error?: string;
 };
+
+/**
+ * Marks runs abandoned by a killed request as failed. A Worker can be cut off
+ * mid-sync, which used to leave a row stuck on 'running' and the admin spinning.
+ */
+export async function failStaleRuns(db: DrizzleClient, olderThanMinutes = 15) {
+	const cutoff = new Date(Date.now() - olderThanMinutes * 60 * 1000);
+
+	const stale = await db
+		.update(partnerSyncRuns)
+		.set({
+			status: 'failed',
+			error: 'Abandoned — the request was cut off before it finished.',
+			finishedAt: new Date()
+		})
+		.where(and(eq(partnerSyncRuns.status, 'running'), lt(partnerSyncRuns.startedAt, cutoff)))
+		.returning({ id: partnerSyncRuns.id });
+
+	return stale.length;
+}
 
 /** Every account we should sync, or just one when an id is given. */
 export async function syncableAccounts(db: DrizzleClient, partnerAccountId?: string) {
@@ -494,50 +514,65 @@ export async function syncInstalls(
 			}
 
 			seen += collected.length;
-			collected.sort((a, b) => a.occurredAt.localeCompare(b.occurredAt));
+
+			// One lookup up front beats a conditional update per shop.
+			const pendingReferralShops = new Set(
+				(
+					await db
+						.select({ shopDomain: referrals.shopDomain })
+						.from(referrals)
+						.where(and(eq(referrals.appId, app.id), eq(referrals.status, 'pending')))
+				).map((r) => r.shopDomain)
+			);
+
+			// Group by shop before touching the database. Per-event writes cost
+			// about eight D1 calls each, and on Workers every one is a subrequest
+			// against a hard per-request cap — a couple of hundred events was
+			// enough to have the request killed mid-run.
+			const byShop = new Map<
+				string,
+				{ shopName: string | null; events: { type: 'installed' | 'uninstalled'; occurredAt: Date; reason: string | null }[] }
+			>();
 
 			for (const event of collected) {
 				const shopDomain = event.shopDomain && normalizeShopDomain(event.shopDomain);
 				if (!shopDomain) continue;
 
-				const occurredAt = new Date(event.occurredAt);
+				const type = event.kind === 'uninstalled' ? 'uninstalled' : 'installed';
+				const entry = byShop.get(shopDomain) ?? { shopName: null, events: [] };
+				entry.shopName ??= event.shopName;
+				entry.events.push({ type, occurredAt: new Date(event.occurredAt), reason: event.reason });
+				byShop.set(shopDomain, entry);
+			}
 
-				if (event.kind === 'uninstalled') {
-					const result = await recordUninstall(db, {
-						appId: app.id,
-						shopDomain,
-						shopName: event.shopName,
-						uninstalledAt: occurredAt,
-						reason: event.reason,
-						source: 'partner_api',
-						createIfMissing: true
-					});
-					if (result) matched++;
-					continue;
-				}
-
-				await recordInstall(db, {
+			for (const [shopDomain, entry] of byShop) {
+				const result = await recordLifecycleHistory(db, {
 					appId: app.id,
-					profile: { shopDomain, name: event.shopName },
-					installedAt: occurredAt,
+					profile: { shopDomain, name: entry.shopName },
+					events: entry.events,
 					source: 'partner_api'
 				});
-				matched++;
+				if (!result) continue;
+				matched += entry.events.length;
 
-				await db
-					.update(referrals)
-					.set({
-						status: 'active',
-						installedAt: sql`coalesce(${referrals.installedAt}, ${Math.floor(occurredAt.getTime() / 1000)})`,
-						updatedAt: new Date()
-					})
-					.where(
-						and(
-							eq(referrals.appId, app.id),
-							eq(referrals.shopDomain, shopDomain),
-							eq(referrals.status, 'pending')
-						)
-					);
+				// Only shops with a pending referral need the extra write.
+				const firstInstall = entry.events.find((e) => e.type === 'installed');
+				if (firstInstall && pendingReferralShops.has(shopDomain)) {
+					await db
+						.update(referrals)
+						.set({
+							status: 'active',
+							installedAt: sql`coalesce(${referrals.installedAt}, ${Math.floor(firstInstall.occurredAt.getTime() / 1000)})`,
+							updatedAt: new Date()
+						})
+						.where(
+							and(
+								eq(referrals.appId, app.id),
+								eq(referrals.shopDomain, shopDomain),
+								eq(referrals.status, 'pending')
+							)
+						);
+				}
 			}
 		}
 
@@ -590,6 +625,7 @@ export async function runFullSync(
 	trigger: 'cron' | 'manual' = 'cron',
 	partnerAccountId?: string
 ): Promise<FullSyncResult> {
+	await failStaleRuns(db);
 	const accounts = await syncableAccounts(db, partnerAccountId);
 
 	const appRuns: AppSyncSummary[] = [];
