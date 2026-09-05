@@ -56,8 +56,8 @@ Call after OAuth completes, once you have an admin token for the shop.
 | `appName` | to register | Display name. **Required the first time an app reports**, otherwise an unknown handle is rejected so a typo cannot create a junk record |
 | `apiKey` | recommended | Your `SHOPIFY_API_KEY`. The most stable identifier — handles and slugs can be renamed, this cannot |
 | `partnerId` | recommended | Shopify Partner organization id, the number in your Partner dashboard URL. Links the app to the right account |
-| `partnerAppId` | optional | `gid://partners/App/…`. Lets revenue match immediately instead of waiting to be matched by name |
-| `listingUrl` | optional | App Store URL. Fetched automatically from the handle if omitted |
+| `partnerAppId` | recommended | The **full** `gid://partners/App/1234567`, not the bare number. Links revenue on the first call. See [Finding your Partner app id](#finding-your-partner-app-id) |
+| `listingUrl` | recommended | App Store URL. Guessed as `apps.shopify.com/<app>` when omitted, which is wrong whenever your App Store handle differs from the handle you report under |
 | `ref` | optional | The affiliate code captured from the install request. **Without it there is no automatic attribution** |
 | `installedAt` | optional | ISO 8601. Defaults to now |
 | `plan` | optional | Your own plan name for this shop |
@@ -123,10 +123,16 @@ curl -sS -X POST https://affiliates.getbee.app/api/track/install \
 
 Call from your `app/uninstalled` webhook handler.
 
+Both endpoints resolve your app the same way: `apiKey` first, then
+`partnerAppId`, then `app` as a last resort. Send the same identity block to
+both. Sending only `app` still works, but then a renamed handle stops matching.
+
 | Field | Required | Notes |
 | --- | --- | --- |
 | `app` | yes | Same handle as the install |
 | `shopDomain` | yes | |
+| `apiKey` | recommended | Your `SHOPIFY_API_KEY`. Resolves the app even if the handle changed since it registered |
+| `partnerAppId` | optional | `gid://partners/App/…`. Also resolves the app |
 | `uninstalledAt` | optional | ISO 8601. Defaults to now |
 | `reason` | optional | Your own churn reason. **Takes precedence over Shopify's**, whichever arrives first |
 | `feedback` | optional | Free text, up to 4000 characters |
@@ -169,10 +175,46 @@ its icon and App Store listing.
 
 Send `apiKey` and `partnerId` alongside it and the record is complete: linked to
 the right Partner account, and resolvable even if you later rename the handle.
-When the app does eventually bill someone, the Partner sync recognises it and
-fills in the Partner app id rather than creating a second record.
+When the app does eventually bill someone, the Partner sync matches it on that
+OAuth client id and fills in the Partner app id, rather than creating a second
+record.
+
+Sending `partnerAppId` yourself skips the wait entirely. Until it is set the
+record carries **No Partner app id — sync will skip it** in the admin, and no
+revenue can attach to it.
 
 Registered apps arrive with **Affiliate off**. Turn it on per app in the admin.
+
+---
+
+## Finding your Partner app id
+
+The numeric id is in the Partner dashboard URL for the app:
+
+```
+https://partners.shopify.com/3975838/apps/337677451265
+                                          ^^^^^^^^^^^^
+```
+
+Send it as the full GID, `gid://partners/App/337677451265`. The bare number is
+stored and compared verbatim, so it will never match what the Partner API
+returns and the link silently never happens.
+
+**Verify it before you hardcode it.** A wrong id that no other record has
+claimed is accepted, and then attaches another app's revenue to yours. The
+Partner API returns each app's OAuth client id, so one query settles it:
+
+```bash
+curl -sS -X POST \
+  "https://partners.shopify.com/$PARTNER_ORG_ID/api/2026-07/graphql.json" \
+  -H "X-Shopify-Access-Token: $PARTNER_API_TOKEN" \
+  -H 'content-type: application/json' \
+  -d '{"query":"query($id:ID!){ app(id:$id){ id name apiKey } }",
+       "variables":{"id":"gid://partners/App/337677451265"}}'
+```
+
+The `apiKey` it returns must equal the `client_id` in your app's
+`shopify.app.toml`. If it does not, you have the wrong id.
 
 ---
 
@@ -237,12 +279,15 @@ import { createHmac } from 'node:crypto';
 
 const BASE = 'https://affiliates.getbee.app';
 
-// The only per-app edit.
+// The only per-app edit. None of it is secret, so hardcode it — these values
+// are fixed for the life of the app.
 const APP = {
-	app: 'rankflo',
-	appName: 'RankFlo',
-	apiKey: process.env.SHOPIFY_API_KEY,
-	partnerId: '3975838'
+	app: 'rankflo',                                   // your handle, becomes the slug
+	appName: 'RankFlo',                               // required on first registration
+	apiKey: process.env.SHOPIFY_API_KEY,              // client_id, the identifier that never moves
+	partnerId: '3975838',                             // Partner organization id
+	partnerAppId: 'gid://partners/App/292818255873',  // full GID, verified — see above
+	listingUrl: 'https://apps.shopify.com/rankflo'    // App Store handle, which may differ from `app`
 };
 
 async function report(path: string, payload: Record<string, unknown>) {
@@ -318,6 +363,21 @@ until an admin approves a manual claim.
 | Status | Meaning |
 | --- | --- |
 | `400` | Body is not JSON, a field failed validation, or the shop domain is not a valid `.myshopify.com` |
-| `401` | Signature missing or wrong. Check you hashed the exact bytes you sent, and that your key matches the one in the admin |
-| `404` | Unknown `app` handle. Include `appName` to register it |
-| `503` | Ingest is not configured — no ingest key has been generated and `CRON_SECRET` is unset |
+| `401` | Signature missing or wrong. Check you hashed the exact bytes you sent, and that your key matches the one in the admin. If the key is definitely current, see below |
+| `404` | The app matched on none of `apiKey`, `partnerAppId` or `app`. Include `appName` to register it |
+| `503` | Ingest is not configured. No ingest key has been generated and `CRON_SECRET` is unset |
+
+### A 401 with the right key
+
+The ingest key is encrypted at rest with `ENCRYPTION_KEY`. If it was generated
+against a different environment than the one serving the request, the service
+cannot decrypt it, falls back to `CRON_SECRET`, and answers `401` while the
+admin still displays a hint for the key that is failing.
+
+`wrangler tail` reports this as `[ingest-key] stored key ••••abcd could not be
+decrypted`. The fix is to regenerate the key from the admin **on the environment
+that serves production**, then update every app.
+
+Regenerating drops the old key immediately, so update all apps in the same
+sitting. Reporting is best effort everywhere, which means a stale key produces
+no visible error in any app — just silence.
