@@ -66,6 +66,44 @@ export async function findAdoptableApp(
 	return match ?? null;
 }
 
+/**
+ * Resolves an app the way every ingest endpoint should: by the identifiers that
+ * cannot drift, and only then by slug.
+ *
+ * The OAuth client id and the Partner app id are fixed for the life of an app.
+ * The slug is ours and the App Store handle is Shopify's, and either can be
+ * renamed — so matching on it alone makes an app disappear the moment it is.
+ */
+export async function findApp(
+	db: DrizzleClient,
+	input: { slug: string; apiKey?: string | null; partnerAppId?: string | null }
+) {
+	const apiKey = input.apiKey?.trim() || null;
+	const partnerAppId = input.partnerAppId?.trim() || null;
+
+	if (apiKey) {
+		const [byKey] = await db.select().from(apps).where(eq(apps.apiKey, apiKey)).limit(1);
+		if (byKey) return byKey;
+	}
+
+	if (partnerAppId) {
+		const [byPartner] = await db
+			.select()
+			.from(apps)
+			.where(eq(apps.partnerAppId, partnerAppId))
+			.limit(1);
+		if (byPartner) return byPartner;
+	}
+
+	const [bySlug] = await db
+		.select()
+		.from(apps)
+		.where(eq(apps.slug, slugify(input.slug)))
+		.limit(1);
+
+	return bySlug ?? null;
+}
+
 export type RegisterInput = {
 	slug: string;
 	name: string;
@@ -110,23 +148,7 @@ export async function findOrRegisterApp(
 
 	// Resolve by the most stable identifier available. Matching on the slug first
 	// would register a duplicate the moment an app handle is renamed.
-	let existing: typeof apps.$inferSelect | undefined;
-
-	if (apiKey) {
-		[existing] = await db.select().from(apps).where(eq(apps.apiKey, apiKey)).limit(1);
-	}
-	if (!existing && partnerAppIdInput) {
-		[existing] = await db
-			.select()
-			.from(apps)
-			.where(eq(apps.partnerAppId, partnerAppIdInput))
-			.limit(1);
-	}
-	if (!existing) {
-		[existing] = await db.select().from(apps).where(eq(apps.slug, slug)).limit(1);
-	}
-
-	const bySlug = existing;
+	const bySlug = await findApp(db, { slug, apiKey, partnerAppId: partnerAppIdInput });
 	if (bySlug) {
 		// Backfill identifiers the app has since learned about itself.
 		const patch: Record<string, unknown> = {};

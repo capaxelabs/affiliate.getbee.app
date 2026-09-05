@@ -1,7 +1,6 @@
 import { json } from '@sveltejs/kit';
-import { eq } from 'drizzle-orm';
 import { z } from 'zod';
-import { apps } from '$lib/server/db/schema';
+import { findApp } from '$lib/server/services/app-registry';
 import { recordUninstall } from '$lib/server/services/merchant';
 import { normalizeShopDomain } from '$lib/server/services/referral';
 import { readSignedBody } from '$lib/server/ingest';
@@ -26,6 +25,10 @@ import type { RequestHandler } from './$types';
  */
 const bodySchema = z.object({
 	app: z.string().min(1),
+	/** The app's SHOPIFY_API_KEY. Resolves the record even after a rename. */
+	apiKey: z.string().trim().max(64).optional(),
+	/** gid://partners/App/... when the app knows it. */
+	partnerAppId: z.string().trim().max(120).optional(),
 	shopDomain: z.string().min(1),
 	uninstalledAt: z.string().datetime().optional().nullable(),
 	reason: z.string().max(120).optional().nullable(),
@@ -45,7 +48,14 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 	const shopDomain = normalizeShopDomain(payload.shopDomain);
 	if (!shopDomain) return json({ error: 'Invalid shop domain.' }, { status: 400 });
 
-	const [app] = await locals.db.select().from(apps).where(eq(apps.slug, payload.app)).limit(1);
+	// Resolved the same way the install endpoint does. Matching on slug alone
+	// meant an app that changed the slug it reports under kept installing fine
+	// and silently 404'd on every uninstall.
+	const app = await findApp(locals.db, {
+		slug: payload.app,
+		apiKey: payload.apiKey,
+		partnerAppId: payload.partnerAppId
+	});
 	if (!app) return json({ error: `Unknown app "${payload.app}".` }, { status: 404 });
 
 	const result = await recordUninstall(locals.db, {
