@@ -103,8 +103,37 @@ export async function findListing(slug: string, name?: string): Promise<Listing 
 	for (const candidate of candidates) {
 		if (!candidate) continue;
 		const listing = await fetchListing(guessListingUrl(candidate));
-		if (listing) return listing;
+		// A guessed handle can land on somebody else's app — "bee" or "smart" are
+		// not ours to claim. Only accept a listing that looks like this app.
+		if (listing && plausibleMatch(listing.title, name ?? slug)) return listing;
 	}
 
 	return null;
+}
+
+/**
+ * Tokens of four or more characters shared between the listing title and the app
+ * name. Deliberately strict: an app whose name is all short words ("Bee AI SEO")
+ * will not auto-match anything, which is the right outcome — no icon beats a
+ * competitor's icon. Set the listing URL by hand for those.
+ */
+function plausibleMatch(listingTitle: string | null, appName: string) {
+	if (!listingTitle) return false;
+
+	const tokens = (value: string) =>
+		new Set(
+			value
+				.toLowerCase()
+				.replace(/[^a-z0-9]+/g, ' ')
+				.split(' ')
+				.filter((t) => t.length >= 4)
+		);
+
+	const wanted = tokens(appName);
+	if (!wanted.size) return false;
+
+	for (const token of tokens(listingTitle)) {
+		if (wanted.has(token)) return true;
+	}
+	return false;
 }
