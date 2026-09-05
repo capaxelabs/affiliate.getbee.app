@@ -287,7 +287,7 @@ shop (as `shopify-app-bee-ai-seo` does), the reporter is:
 // src/lib/server/affiliates.ts
 import { createHmac } from 'node:crypto';
 
-const BASE = 'https://affiliate.getbee.app';
+const BASE = 'https://affiliates.getbee.app';
 
 // Identity of this app. The only per-app edit.
 const APP = {

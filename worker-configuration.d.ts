@@ -5,7 +5,7 @@ interface __BaseEnv_Env {
 	DB: D1Database;
 	ASSETS: Fetcher;
 	NODE_ENV: "production";
-	APP_URL: "https://affiliate.getbee.app";
+	APP_URL: "https://affiliates.getbee.app";
 	APP_NAME: "Bee Affiliates";
 	EMAIL_API_URL: "https://tools.capaxe.com/email";
 	EMAIL_FROM: "Bee Affiliates <affiliates@getbee.app>";

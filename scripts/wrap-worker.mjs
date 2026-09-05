@@ -35,7 +35,7 @@ async function runCron(env, ctx, task) {
 		return;
 	}
 
-	const base = env.APP_URL ?? 'https://affiliate.getbee.app';
+	const base = env.APP_URL ?? 'https://affiliates.getbee.app';
 	const request = new Request(base + '/api/cron/sync?task=' + task, {
 		method: 'POST',
 		headers: { authorization: 'Bearer ' + env.CRON_SECRET }

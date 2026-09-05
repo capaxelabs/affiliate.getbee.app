@@ -12,7 +12,7 @@ export type Listing = {
 	tagline: string | null;
 };
 
-const USER_AGENT = 'BeeAffiliates/1.0 (+https://affiliate.getbee.app)';
+const USER_AGENT = 'BeeAffiliates/1.0 (+https://affiliates.getbee.app)';
 
 /** Most apps publish at apps.shopify.com/<slug>, but it is only a guess. */
 export function guessListingUrl(slug: string) {

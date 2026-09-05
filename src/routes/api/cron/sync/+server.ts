@@ -8,7 +8,7 @@ import type { RequestHandler } from './$types';
  * Scheduled Partner API sync. adapter-cloudflare exports only a fetch handler,
  * so point an external scheduler at this endpoint:
  *
- *   curl -X POST https://affiliate.getbee.app/api/cron/sync \
+ *   curl -X POST https://affiliates.getbee.app/api/cron/sync \
  *        -H "Authorization: Bearer $CRON_SECRET"
  *
  * Cron Triggers reach it through worker.js. `?task=lifecycle` skips the Partner
