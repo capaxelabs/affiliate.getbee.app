@@ -163,6 +163,41 @@ async function rebuildInstallState(db: DrizzleClient, installId: string) {
 		.where(eq(installs.id, installId));
 }
 
+
+/**
+ * True when a state event of this kind is already recorded within a few minutes.
+ *
+ * The Partner API timestamps an install when Shopify saw it; an app's own webhook
+ * timestamps it when OAuth finished, seconds or minutes later. Exact-timestamp
+ * dedup would keep both and double the install count for any app reporting from
+ * both sources. Only the single-event path needs this — the Partner sync's batch
+ * path is single-source and cannot collide with itself.
+ */
+async function hasNearbyEvent(
+	db: DrizzleClient,
+	installId: string,
+	type: 'installed' | 'uninstalled',
+	occurredAt: Date,
+	toleranceMinutes = 10
+) {
+	const window = toleranceMinutes * 60;
+	const at = Math.floor(occurredAt.getTime() / 1000);
+
+	const [near] = await db
+		.select({ id: installEvents.id })
+		.from(installEvents)
+		.where(
+			and(
+				eq(installEvents.installId, installId),
+				eq(installEvents.type, type),
+				sql`abs(${installEvents.occurredAt} - ${at}) <= ${window}`
+			)
+		)
+		.limit(1);
+
+	return Boolean(near);
+}
+
 export type RecordInstallResult = {
 	merchantId: string;
 	installId: string;
@@ -227,7 +262,14 @@ export async function recordInstall(
 
 	const wasUninstalled = existing?.status === 'uninstalled';
 
-	const recorded = await applyLifecycleEvent(db, {
+	// The Partner sync may already have this install under a slightly different
+	// clock; recording it again would double the count.
+	const duplicate =
+		!firstInstall && (await hasNearbyEvent(db, installId, 'installed', installedAt));
+
+	const recorded = duplicate
+		? false
+		: await applyLifecycleEvent(db, {
 		installId,
 		appId: options.appId,
 		merchantId: merchant.id,
@@ -235,7 +277,7 @@ export async function recordInstall(
 		occurredAt: installedAt,
 		source: options.source ?? 'ingest',
 		metadata: { plan: options.plan ?? null }
-	});
+	  });
 
 	// Only queue a welcome for a genuinely new install we have not seen before.
 	if (recorded && (firstInstall || wasUninstalled)) {
@@ -319,15 +361,19 @@ export async function recordUninstall(
 		await db.update(installs).set(reasonPatch).where(eq(installs.id, row.install.id));
 	}
 
-	const recorded = await applyLifecycleEvent(db, {
-		installId: row.install.id,
-		appId: options.appId,
-		merchantId: row.merchant.id,
-		type: 'uninstalled',
-		occurredAt: uninstalledAt,
-		source,
-		metadata: { reason: options.reason ?? null, feedback: options.feedback ?? null }
-	});
+	const duplicateOff = await hasNearbyEvent(db, row.install.id, 'uninstalled', uninstalledAt);
+
+	const recorded = duplicateOff
+		? false
+		: await applyLifecycleEvent(db, {
+				installId: row.install.id,
+				appId: options.appId,
+				merchantId: row.merchant.id,
+				type: 'uninstalled',
+				occurredAt: uninstalledAt,
+				source,
+				metadata: { reason: options.reason ?? null, feedback: options.feedback ?? null }
+		  });
 
 	// Feedback arriving after the fact is its own event, not another uninstall.
 	if (!recorded && options.feedback) {

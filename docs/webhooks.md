@@ -164,6 +164,44 @@ Registered apps arrive with **Affiliate off**. Turn it on per app in the admin.
 
 ---
 
+## Backfilling history
+
+Your app has probably been recording installs, uninstalls and merchant emails
+since long before this service existed. Replaying that history is worth doing:
+it is the only way the merchants already known from the Partner API gain a
+contact address.
+
+Post each old record to the same endpoints, using the stored dates:
+
+```js
+await report('/api/track/install', {
+  shopDomain: store.shopDomain,
+  installedAt: new Date(store.installedAt).toISOString(),  // must be ISO 8601
+  shop: { email: store.shopOwnerEmail /* … */ }
+});
+
+if (!store.isActive) {
+  await report('/api/track/uninstall', {
+    shopDomain: store.shopDomain,
+    uninstalledAt: new Date(store.uninstalledAt).toISOString()
+  });
+}
+```
+
+Three things to know:
+
+- **Run it from a machine, not from a Worker.** One request per store will exceed
+  a Worker's subrequest cap on any real catalogue.
+- **Timestamps must be ISO 8601.** SQLite's `datetime()` produces
+  `2026-03-23 11:57:02`, which is rejected. Convert first.
+- **Overlapping with Partner API history is safe.** Shopify timestamps an install
+  when it happened; your app timestamps it when OAuth finished, seconds later. An
+  install or uninstall within ten minutes of one already recorded is treated as
+  the same event, so the count is not doubled — while a genuine reinstall months
+  later still counts.
+
+Safe to run more than once.
+
 ## Guarantees
 
 **Idempotent.** Retried webhooks are safe. Install and uninstall events are keyed
