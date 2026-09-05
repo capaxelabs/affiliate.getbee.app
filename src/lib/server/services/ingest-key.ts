@@ -22,9 +22,17 @@ export async function getIngestKey(db: DrizzleClient, env: Env) {
 
 	try {
 		return await decryptSecret(env, row.value);
-	} catch {
-		// Unreadable ciphertext means ENCRYPTION_KEY changed. Treat as absent so
-		// CRON_SECRET still works and the key can be regenerated.
+	} catch (error) {
+		// Treated as absent so CRON_SECRET still works and the key can be
+		// regenerated. Logged because the two states are otherwise identical from
+		// the outside: every app keeps getting "Bad signature" with a key the
+		// admin happily displays, and nothing anywhere says why.
+		console.error(
+			`[ingest-key] stored key ${row.hint ?? '(no hint)'} could not be decrypted. ` +
+				'ENCRYPTION_KEY does not match the one that encrypted it — regenerate ' +
+				'the key from the admin on this environment.',
+			error
+		);
 		return null;
 	}
 }
