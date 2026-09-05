@@ -20,6 +20,7 @@ import {
 	fetchRelationshipEvents,
 	fetchTransactions,
 	toCents,
+	type PartnerApp,
 	type PartnerCredentials,
 	type PartnerRelationshipEvent,
 	type PartnerTransaction
@@ -120,10 +121,25 @@ export async function syncApps(
 					.where(eq(apps.partnerAppId, partnerApp.id))
 					.limit(1);
 
+				// The Partner app detail carries the OAuth client id, which is what a
+				// webhook-registered record can be matched on. Fetched lazily and at
+				// most once: adoption needs it, and so does the backfill below.
+				let appDetail: PartnerApp | null | undefined;
+				const loadDetail = async (): Promise<PartnerApp | null> => {
+					if (appDetail === undefined) {
+						appDetail = await fetchApp(credentials, partnerApp.id).catch(() => null);
+					}
+					return appDetail;
+				};
+
 				// An app registered by its own install webhook has no Partner app id
-				// yet. Adopt it by name rather than creating a second record.
+				// yet. Adopt it rather than creating a second record.
 				if (!existing) {
-					const adoptable = await findAdoptableApp(db, partnerApp.name);
+					const adoptable = await findAdoptableApp(
+						db,
+						partnerApp.name,
+						(await loadDetail())?.apiKey
+					);
 					if (adoptable) {
 						const [adopted] = await db
 							.update(apps)
@@ -143,17 +159,17 @@ export async function syncApps(
 					// The OAuth client id is what a webhook resolves by, so make sure
 					// we hold it even for apps discovered before this existed.
 					if (!existing.apiKey) {
-						const detail = await fetchApp(credentials, partnerApp.id).catch(() => null);
-						if (detail?.apiKey) {
+						const loaded = await loadDetail();
+						if (loaded?.apiKey) {
 							const [clash] = await db
 								.select({ id: apps.id })
 								.from(apps)
-								.where(eq(apps.apiKey, detail.apiKey))
+								.where(eq(apps.apiKey, loaded.apiKey))
 								.limit(1);
 							if (!clash) {
 								await db
 									.update(apps)
-									.set({ apiKey: detail.apiKey, updatedAt: new Date() })
+									.set({ apiKey: loaded.apiKey, updatedAt: new Date() })
 									.where(eq(apps.id, existing.id));
 								updated++;
 							}
@@ -189,7 +205,7 @@ export async function syncApps(
 					continue;
 				}
 
-				const detail = await fetchApp(credentials, partnerApp.id).catch(() => null);
+				const detail = await loadDetail();
 				const slug = await uniqueSlug(db, partnerApp.name);
 				// Icon and listing URL only exist on the public App Store page.
 				const listing = await findListing(slug, partnerApp.name);

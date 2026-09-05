@@ -33,10 +33,30 @@ export async function uniqueSlug(db: DrizzleClient, name: string, preferred?: st
 
 /**
  * An app that already exists but has no Partner app id yet — typically one
- * registered by a webhook before it ever billed anyone. Matching on name lets
- * the Partner API sync adopt it instead of creating a duplicate.
+ * registered by a webhook before it ever billed anyone. Lets the Partner API
+ * sync adopt it instead of creating a duplicate.
+ *
+ * Resolves by OAuth client id first. The name is a display string that can be
+ * changed in the Partner dashboard at any time, and a rename between the
+ * webhook and the sync would otherwise leave two records for one app. The name
+ * stays as a fallback for apps registered before the client id was recorded.
  */
-export async function findAdoptableApp(db: DrizzleClient, name: string) {
+export async function findAdoptableApp(
+	db: DrizzleClient,
+	name: string,
+	apiKey?: string | null
+) {
+	const key = apiKey?.trim();
+
+	if (key) {
+		const [byKey] = await db
+			.select()
+			.from(apps)
+			.where(and(isNull(apps.partnerAppId), eq(apps.apiKey, key)))
+			.limit(1);
+		if (byKey) return byKey;
+	}
+
 	const [match] = await db
 		.select()
 		.from(apps)
