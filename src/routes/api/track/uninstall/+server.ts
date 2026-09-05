@@ -33,7 +33,7 @@ const bodySchema = z.object({
 });
 
 export const POST: RequestHandler = async ({ request, locals, platform }) => {
-	const parsedBody = await readSignedBody(request, platform?.env?.CRON_SECRET);
+	const parsedBody = await readSignedBody(request, platform!.env, locals.db);
 	if (!parsedBody.ok) return parsedBody.response;
 
 	const parsed = bodySchema.safeParse(parsedBody.body);

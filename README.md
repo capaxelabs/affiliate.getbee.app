@@ -85,13 +85,18 @@ npx wrangler secret put EMAIL_API_KEY
 
 | Secret | What it does | Required? |
 | --- | --- | --- |
-| `ENCRYPTION_KEY` | Encrypts the Partner Access Tokens stored in D1 | Before you can connect a Partner account |
-| `CRON_SECRET` | Signs install/uninstall calls from your apps and guards `/api/cron/sync` | Before ingest or scheduled sync work |
+| `ENCRYPTION_KEY` | Encrypts the Partner Access Tokens and the ingest key stored in D1 | Before you can connect a Partner account |
+| `CRON_SECRET` | Bootstrap fallback for signed ingest and `/api/cron/sync`. Day to day you use the ingest key below instead | Recommended |
 | `EMAIL_API_KEY` | Key for your email endpoint | Optional — without it, email is logged to the worker console instead of sent |
 
 > **`ENCRYPTION_KEY` cannot be rotated casually.** Changing it makes every stored
 > Partner Access Token undecryptable and they all have to be re-entered. Set it once
 > and keep a copy somewhere safe.
+
+**The ingest key is not a worker secret.** It is generated in the admin under
+**Apps → Ingest key**, stored encrypted in D1, and can be read back whenever you
+need it — which a worker secret cannot. One key covers every app's webhooks and
+the cron endpoint. See [docs/webhooks.md](docs/webhooks.md).
 
 ### 5. Deploy
 
@@ -257,7 +262,7 @@ The same endpoint works from any external scheduler:
 
 ```bash
 curl -X POST https://your-domain.example/api/cron/sync \
-  -H "Authorization: Bearer $CRON_SECRET"          # add ?task=lifecycle to skip the Partner API
+  -H "Authorization: Bearer $INGEST_KEY"           # add ?task=lifecycle to skip the Partner API
 ```
 
 ---

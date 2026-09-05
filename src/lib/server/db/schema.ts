@@ -750,6 +750,22 @@ export const payoutsRelations = relations(payouts, ({ one, many }) => ({
 	commissions: many(commissions)
 }));
 
+/* ---------------------------------------------------------------- settings */
+
+/**
+ * Small key/value store for values an admin has to be able to read back.
+ *
+ * `ingest_key` lives here rather than as a worker secret because a secret is
+ * write-only: nobody can recover it a week later to configure a new app. It is
+ * encrypted with ENCRYPTION_KEY, revealed on demand in the admin, and rotatable.
+ */
+export const settings = sqliteTable('settings', {
+	key: text('key').primaryKey(),
+	value: text('value').notNull(),
+	hint: text('hint'),
+	...timestamps
+});
+
 /* -------------------------------------------------------------------- types */
 
 export type User = typeof users.$inferSelect;
@@ -770,3 +786,4 @@ export type PartnerAccount = typeof partnerAccounts.$inferSelect;
 export type AdminScope = typeof adminScopes.$inferSelect;
 export type Payout = typeof payouts.$inferSelect;
 export type PartnerSyncRun = typeof partnerSyncRuns.$inferSelect;
+export type Setting = typeof settings.$inferSelect;

@@ -5,6 +5,8 @@ import { requireAdminAccess, requireOwner, appScopeFilter } from '$lib/server/sc
 import { apps, auditLog, partnerAccounts } from '$lib/server/db/schema';
 import { revenueByApp } from '$lib/server/services/stats';
 import { syncApps, syncableAccounts } from '$lib/server/services/sync';
+import { EncryptionError } from '$lib/server/crypto';
+import { getIngestKey, ingestKeyHint, rotateIngestKey } from '$lib/server/services/ingest-key';
 import { fetchListing, findListing } from '$lib/server/services/listing';
 import { lifecycleEmailStats } from '$lib/server/services/lifecycle';
 import type { Actions, PageServerLoad } from './$types';
@@ -36,6 +38,7 @@ export const load: PageServerLoad = async (event) => {
 
 	return {
 		canDiscover: connectedAccounts.length > 0,
+		ingestKeyHint: scope.canWrite ? await ingestKeyHint(event.locals.db) : null,
 		apps: rows.map((r) => {
 			const stats = revenueById.get(r.app.id);
 			return {
@@ -289,6 +292,56 @@ export const actions: Actions = {
 		});
 
 		return { success: true, message: `Listing refreshed for ${app.name}.` };
+	},
+
+	/**
+	 * Reveals the ingest key. Deliberately an action rather than part of the page
+	 * load: the key should not sit in the HTML of a page anyone leaves open, and
+	 * this way each reveal is an audited, owner-only step.
+	 */
+	revealIngestKey: async (event) => {
+		const admin = await requireOwner(event);
+
+		try {
+			const key = await getIngestKey(event.locals.db, event.platform!.env);
+			if (!key) return fail(404, { error: 'No ingest key yet. Generate one.' });
+
+			await event.locals.db.insert(auditLog).values({
+				actorUserId: admin.userId,
+				action: 'ingest_key.reveal',
+				entityType: 'setting',
+				entityId: 'ingest_key'
+			});
+
+			return { ingestKey: key };
+		} catch (error) {
+			if (error instanceof EncryptionError) return fail(503, { error: error.message });
+			throw error;
+		}
+	},
+
+	/** Issues a new key. Every app has to be updated before the old one is dropped. */
+	regenerateIngestKey: async (event) => {
+		const admin = await requireOwner(event);
+
+		try {
+			const key = await rotateIngestKey(event.locals.db, event.platform!.env);
+
+			await event.locals.db.insert(auditLog).values({
+				actorUserId: admin.userId,
+				action: 'ingest_key.regenerate',
+				entityType: 'setting',
+				entityId: 'ingest_key'
+			});
+
+			return {
+				ingestKey: key,
+				message: 'New key. Update every app — the previous one no longer works.'
+			};
+		} catch (error) {
+			if (error instanceof EncryptionError) return fail(503, { error: error.message });
+			throw error;
+		}
 	},
 
 	toggleStatus: async (event) => {

@@ -1,12 +1,17 @@
 import { json } from '@sveltejs/kit';
+import type { DrizzleClient } from '$lib/server/db';
+import { getIngestKey } from '$lib/server/services/ingest-key';
 
 /**
- * Shared HMAC check for the endpoints each Bee app posts to. The signature is
- * hex SHA-256 over the exact raw body, keyed with CRON_SECRET, so a merchant
- * can't forge an install or an attribution.
+ * Signature checking for the endpoints each Bee app posts to.
+ *
+ * One key for every app, stored in the database and revealable in the admin —
+ * a worker secret cannot be read back, and nobody remembers one a week later.
+ * CRON_SECRET still verifies as a fallback so anything configured before the
+ * key existed keeps working.
  */
 export async function verifySignature(secret: string, raw: string, signature: string | null) {
-	if (!signature) return false;
+	if (!signature || !secret) return false;
 
 	const key = await crypto.subtle.importKey(
 		'raw',
@@ -26,25 +31,35 @@ export async function verifySignature(secret: string, raw: string, signature: st
 
 export type IngestBody = { ok: true; raw: string; body: unknown } | { ok: false; response: Response };
 
+type Env = App.Platform['env'];
+
 /** Reads and authenticates an ingest request, or hands back the error response. */
 export async function readSignedBody(
 	request: Request,
-	secret: string | undefined
+	env: Env,
+	db: DrizzleClient
 ): Promise<IngestBody> {
-	if (!secret) {
-		return { ok: false, response: json({ error: 'Ingest is not configured.' }, { status: 503 }) };
-	}
-
 	const raw = await request.text();
 	const signature = request.headers.get('x-bee-signature');
 
-	if (!(await verifySignature(secret, raw, signature))) {
-		return { ok: false, response: json({ error: 'Bad signature.' }, { status: 401 }) };
-	}
-
+	let body: unknown;
 	try {
-		return { ok: true, raw, body: JSON.parse(raw) };
+		body = JSON.parse(raw);
 	} catch {
 		return { ok: false, response: json({ error: 'Body must be JSON.' }, { status: 400 }) };
 	}
+
+	const candidates = [await getIngestKey(db, env), env?.CRON_SECRET].filter(
+		(candidate): candidate is string => Boolean(candidate)
+	);
+
+	if (!candidates.length) {
+		return { ok: false, response: json({ error: 'Ingest is not configured.' }, { status: 503 }) };
+	}
+
+	for (const candidate of candidates) {
+		if (await verifySignature(candidate, raw, signature)) return { ok: true, raw, body };
+	}
+
+	return { ok: false, response: json({ error: 'Bad signature.' }, { status: 401 }) };
 }

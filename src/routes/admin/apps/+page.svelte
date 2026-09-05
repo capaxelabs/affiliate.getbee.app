@@ -17,6 +17,8 @@
 	import DownloadIcon from '@lucide/svelte/icons/cloud-download';
 	import LoaderIcon from '@lucide/svelte/icons/loader-circle';
 	import CheckIcon from '@lucide/svelte/icons/check';
+	import KeyIcon from '@lucide/svelte/icons/key-round';
+	import CopyButton from '$lib/components/copy-button.svelte';
 	import { money, commissionLabel } from '$lib/format';
 	import type { ActionData, PageData } from './$types';
 
@@ -30,6 +32,13 @@
 	let welcomeEmail = $state(false);
 	let offboardEmail = $state(false);
 	let partnerAccountId = $state('');
+
+	// Only ever held in memory, never in the page data.
+	let revealed = $state<string | null>(null);
+
+	$effect(() => {
+		if (form && 'ingestKey' in form && form.ingestKey) revealed = form.ingestKey as string;
+	});
 
 	const accountLabel = $derived(
 		data.accounts.find((a) => a.id === partnerAccountId)?.name ?? 'Not linked'
@@ -73,6 +82,12 @@
 			if (result.type === 'failure') toast.error(result.data?.error ?? 'Could not reach Shopify.');
 			await update();
 		};
+	};
+
+	const keyAction = () => async ({ result, update }: any) => {
+		if (result.type === 'failure') toast.error(result.data?.error ?? 'Could not read that key.');
+		if (result.type === 'success' && result.data?.message) toast.success(result.data.message);
+		await update({ reset: false });
 	};
 
 	const toggle = () => async ({ result, update }: any) => {
@@ -122,6 +137,40 @@
 					{data.emailStats.welcome.failed + data.emailStats.offboard.failed} failed
 				</span>
 			{/if}
+		</div>
+	{/if}
+
+	{#if data.canWrite}
+		<div class="rounded-lg border bg-background px-4 py-3">
+			<div class="flex flex-wrap items-center gap-3">
+				<KeyIcon class="size-4 text-muted-foreground" />
+				<span class="text-sm font-medium">Ingest key</span>
+				{#if revealed}
+					<code class="flex-1 rounded border bg-muted/40 px-2.5 py-1.5 font-mono text-xs break-all">
+						{revealed}
+					</code>
+					<CopyButton value={revealed} label="Copy" />
+					<Button size="sm" variant="ghost" onclick={() => (revealed = null)}>Hide</Button>
+				{:else}
+					<code class="flex-1 font-mono text-xs text-muted-foreground">
+						{data.ingestKeyHint ?? 'Not generated yet'}
+					</code>
+					<form method="POST" action="?/revealIngestKey" use:enhance={keyAction}>
+						<Button type="submit" size="sm" variant="outline">Show</Button>
+					</form>
+				{/if}
+				<form method="POST" action="?/regenerateIngestKey" use:enhance={keyAction}>
+					<Button type="submit" size="sm" variant="ghost">
+						{data.ingestKeyHint ? 'Regenerate' : 'Generate'}
+					</Button>
+				</form>
+			</div>
+			<p class="mt-2 text-xs text-muted-foreground">
+				One key for everything. Every app signs its install and uninstall webhooks with it
+				(set it as <code class="font-mono">AFFILIATES_SECRET</code>), and the cron endpoint takes
+				it as a bearer token. Regenerating stops the old key working straight away, so every app
+				has to be updated.
+			</p>
 		</div>
 	{/if}
 

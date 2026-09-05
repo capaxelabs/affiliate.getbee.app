@@ -66,3 +66,10 @@ export async function decryptSecret(env: App.Platform['env'], payload: string) {
 export function tokenHint(token: string) {
 	return token.length <= 4 ? '••••' : `••••${token.slice(-4)}`;
 }
+
+/** A fresh ingest key. Prefixed so it is recognisable in logs and configs. */
+export function newIngestKey() {
+	const bytes = crypto.getRandomValues(new Uint8Array(24));
+	const hex = [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('');
+	return `bee_ingest_${hex}`;
+}

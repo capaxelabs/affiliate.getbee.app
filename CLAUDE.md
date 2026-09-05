@@ -169,7 +169,7 @@ every stored token undecryptable, so they would all need re-entering.
 
 1. **Tracked link** — `/r/{refCode}/{appSlug}` records a click and forwards to the
    listing with `?ref=`. The Bee app captures that on install and posts it to
-   `/api/track/install`, signed with `CRON_SECRET`. This is the only automatic path.
+   `/api/track/install`, signed with the ingest key. This is the only automatic path.
 2. **Claim** — the affiliate submits a shop domain, an admin approves it.
 3. **Manual** — an admin attributes a shop directly from `/admin/referrals`.
 
@@ -217,7 +217,7 @@ Never go back to mutating the install row directly from a webhook handler.
 ## Merchant lifecycle
 
 Each Bee app posts to `/api/track/install` and `/api/track/uninstall`, both signed
-with `CRON_SECRET`. Install carries an optional `shop` object (name, email, owner,
+with the ingest key. Install carries an optional `shop` object (name, email, owner,
 country, currency, plan) — without an email we can record the merchant but cannot
 mail them.
 
@@ -267,13 +267,19 @@ build. Both files are gitignored build artifacts — edit the generator, not the
 The endpoint is also reachable directly:
 
 ```
-POST /api/cron/sync[?task=lifecycle]   Authorization: Bearer $CRON_SECRET
+POST /api/cron/sync[?task=lifecycle]   Authorization: Bearer $INGEST_KEY
 ```
 
 
 ## Secrets
 
 `wrangler secret put NAME` for: `EMAIL_API_KEY`, `CRON_SECRET`, `ENCRYPTION_KEY`.
+
+**The ingest key is deliberately not a worker secret.** One key signs every app's
+webhooks and authorises the cron endpoint, and it lives encrypted in `settings`
+so the admin can read it back — `wrangler secret put` is write-only, and nobody
+recovers a secret a week later to configure a new app. `src/lib/server/services/ingest-key.ts`
+owns it; `CRON_SECRET` stays as a fallback so anything set up before it keeps working.
 
 Without `EMAIL_API_KEY` the mailer logs codes to the console instead of sending, which
 is what you want locally.
@@ -285,7 +291,7 @@ delete them.
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **affiliate.getbee.app** (982 symbols, 2015 relationships, 64 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **affiliate.getbee.app** (1022 symbols, 2088 relationships, 67 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > Index stale? Run `node .gitnexus/run.cjs analyze` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? `npx gitnexus analyze` (npm 11 crash → `npm i -g gitnexus`; #1939).
 

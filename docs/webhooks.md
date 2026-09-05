@@ -11,11 +11,23 @@ Base URL: `https://affiliates.getbee.app`
 
 ---
 
+## The ingest key
+
+One key for every app and both endpoints. Read it in the admin under
+**Apps → Ingest key → Show**, and set it in your app as `AFFILIATES_SECRET`.
+
+It lives in the database rather than in a worker secret so it can be read back —
+`wrangler secret put` is write-only, and nobody remembers a secret a week later
+when a new app needs configuring. **Regenerate** issues a new one and stops the
+old one working immediately, so every app has to be updated together.
+
+`CRON_SECRET` still verifies as a fallback, which keeps anything configured
+before the key existed working.
+
 ## Signing
 
 Every request is signed with HMAC-SHA256 over the **exact raw body**, hex
-encoded, in an `X-Bee-Signature` header. The key is the `CRON_SECRET` worker
-secret — the same value on both sides.
+encoded, in an `X-Bee-Signature` header.
 
 Sign the string you actually send. Re-serialising the object before hashing will
 produce a different signature and a `401`.
@@ -24,7 +36,7 @@ produce a different signature and a `401`.
 import { createHmac } from 'node:crypto';
 
 const body = JSON.stringify(payload);           // serialise once
-const signature = createHmac('sha256', process.env.CRON_SECRET)
+const signature = createHmac('sha256', process.env.AFFILIATES_SECRET)
 	.update(body)
 	.digest('hex');
 ```
@@ -77,7 +89,7 @@ BODY='{
 
 curl -sS -X POST https://affiliates.getbee.app/api/track/install \
   -H 'content-type: application/json' \
-  -H "x-bee-signature: $(printf '%s' "$BODY" | openssl dgst -sha256 -hmac "$CRON_SECRET" -hex | sed 's/.*= //')" \
+  -H "x-bee-signature: $(printf '%s' "$BODY" | openssl dgst -sha256 -hmac "$AFFILIATES_SECRET" -hex | sed 's/.*= //')" \
   -d "$BODY"
 ```
 
@@ -129,7 +141,7 @@ BODY='{
 
 curl -sS -X POST https://affiliates.getbee.app/api/track/uninstall \
   -H 'content-type: application/json' \
-  -H "x-bee-signature: $(printf '%s' "$BODY" | openssl dgst -sha256 -hmac "$CRON_SECRET" -hex | sed 's/.*= //')" \
+  -H "x-bee-signature: $(printf '%s' "$BODY" | openssl dgst -sha256 -hmac "$AFFILIATES_SECRET" -hex | sed 's/.*= //')" \
   -d "$BODY"
 ```
 
@@ -234,7 +246,7 @@ const APP = {
 };
 
 async function report(path: string, payload: Record<string, unknown>) {
-	const secret = process.env.CRON_SECRET;
+	const secret = process.env.AFFILIATES_SECRET;
 	if (!secret) return;
 
 	const body = JSON.stringify({ ...APP, ...payload });
@@ -306,6 +318,6 @@ until an admin approves a manual claim.
 | Status | Meaning |
 | --- | --- |
 | `400` | Body is not JSON, a field failed validation, or the shop domain is not a valid `.myshopify.com` |
-| `401` | Signature missing or wrong. Check you hashed the exact bytes you sent, and that both sides share `CRON_SECRET` |
+| `401` | Signature missing or wrong. Check you hashed the exact bytes you sent, and that your key matches the one in the admin |
 | `404` | Unknown `app` handle. Include `appName` to register it |
-| `503` | Ingest is not configured — `CRON_SECRET` is unset on the server |
+| `503` | Ingest is not configured — no ingest key has been generated and `CRON_SECRET` is unset |
