@@ -228,7 +228,9 @@
 										</div>
 									{/if}
 									<div class="min-w-0">
-										<p class="font-medium">{app.name}</p>
+										<a href="/admin/apps/{app.id}" class="font-medium hover:underline">
+											{app.name}
+										</a>
 										{#if !app.partnerAppId}
 											<p class="text-xs text-amber-600">No Partner app id — sync will skip it</p>
 										{:else if !app.partnerAccountId}

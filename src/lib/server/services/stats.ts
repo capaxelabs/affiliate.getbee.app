@@ -4,6 +4,7 @@ import {
 	affiliates,
 	apps,
 	commissions,
+	installEvents,
 	installs,
 	merchants,
 	payouts,
@@ -518,6 +519,47 @@ export async function revenueSeries(db: DrizzleClient, scope: AppScope = null, m
 		.orderBy(sql`strftime('%Y-%m', ${transactions.occurredAt}, 'unixepoch')`);
 
 	return rows.map((r) => ({ period: r.period, gross: zero(r.gross), net: zero(r.net) }));
+}
+
+export type LifecyclePoint = { period: string; installed: number; uninstalled: number };
+
+/**
+ * Installs and uninstalls by month for one app, read from the event trail
+ * rather than the install row — `installs` only remembers the latest state, so
+ * a shop that left and came back would otherwise vanish from its first month.
+ */
+export async function appLifecycleSeries(
+	db: DrizzleClient,
+	appId: string,
+	months = 12
+): Promise<LifecyclePoint[]> {
+	const from = new Date();
+	from.setUTCMonth(from.getUTCMonth() - (months - 1), 1);
+	from.setUTCHours(0, 0, 0, 0);
+
+	const period = sql<string>`strftime('%Y-%m', ${installEvents.occurredAt}, 'unixepoch')`;
+
+	const rows = await db
+		.select({ period, type: installEvents.type, value: count() })
+		.from(installEvents)
+		.where(
+			and(
+				eq(installEvents.appId, appId),
+				gte(installEvents.occurredAt, from),
+				inArray(installEvents.type, ['installed', 'uninstalled'])
+			)
+		)
+		.groupBy(period, installEvents.type);
+
+	const byPeriod = new Map<string, LifecyclePoint>();
+	for (const row of rows) {
+		const point = byPeriod.get(row.period) ?? { period: row.period, installed: 0, uninstalled: 0 };
+		if (row.type === 'installed') point.installed = zero(row.value);
+		else point.uninstalled = zero(row.value);
+		byPeriod.set(row.period, point);
+	}
+
+	return [...byPeriod.values()].sort((a, b) => a.period.localeCompare(b.period));
 }
 
 export type MerchantTotals = {

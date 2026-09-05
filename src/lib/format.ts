@@ -58,3 +58,8 @@ export function humanize(value: string | null | undefined) {
 	const spaced = value.replace(/[_-]+/g, ' ').trim();
 	return spaced.charAt(0).toUpperCase() + spaced.slice(1);
 }
+
+/** "1 merchant" / "3 merchants" — hints read wrong without it. */
+export function plural(count: number, one: string, many = `${one}s`) {
+	return `${count} ${count === 1 ? one : many}`;
+}

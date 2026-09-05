@@ -5,13 +5,17 @@
 	let {
 		title,
 		description,
+		leading,
 		actions
-	}: { title: string; description?: string; actions?: Snippet } = $props();
+	}: { title: string; description?: string; leading?: Snippet; actions?: Snippet } = $props();
 </script>
 
 <header class="flex items-start justify-between gap-4 px-5 pt-5 pb-4 sm:px-8">
 	<div class="flex min-w-0 items-center gap-2">
 		<Sidebar.Trigger class="-ml-1 md:hidden" />
+		{#if leading}
+			{@render leading()}
+		{/if}
 		<div class="min-w-0">
 			<h1 class="truncate text-xl font-semibold tracking-tight">{title}</h1>
 			{#if description}
