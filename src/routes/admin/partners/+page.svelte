@@ -60,21 +60,13 @@
 	description="Connect one or more Shopify Partner organizations. Each app belongs to one."
 >
 	{#snippet actions()}
-		<Button onclick={openCreate} disabled={!data.encryptionReady}>
+		<Button onclick={openCreate}>
 			<PlusIcon class="size-4" /> Connect account
 		</Button>
 	{/snippet}
 </PageHeader>
 
 <div class="space-y-5 px-5 pb-10 sm:px-8">
-	{#if !data.encryptionReady}
-		<div class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-			<code class="font-mono">ENCRYPTION_KEY</code> is not set, so Partner Access Tokens cannot be
-			stored. Run
-			<code class="font-mono">wrangler secret put ENCRYPTION_KEY</code> first.
-		</div>
-	{/if}
-
 	{#if data.canImportFromEnv}
 		<div
 			class="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-background px-4 py-3 text-sm"
@@ -86,9 +78,7 @@
 				</p>
 			</div>
 			<form method="POST" action="?/importFromEnv" use:enhance={act}>
-				<Button type="submit" variant="outline" disabled={!data.encryptionReady}>
-					Import from environment
-				</Button>
+				<Button type="submit" variant="outline">Import from environment</Button>
 			</form>
 		</div>
 	{/if}
@@ -110,7 +100,7 @@
 				description="Connect a Shopify Partner organization to start syncing revenue and installs."
 			>
 				{#snippet action()}
-					<Button onclick={openCreate} disabled={!data.encryptionReady}>Connect account</Button>
+					<Button onclick={openCreate}>Connect account</Button>
 				{/snippet}
 			</EmptyState>
 		{:else}

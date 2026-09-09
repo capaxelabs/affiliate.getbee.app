@@ -71,27 +71,25 @@ npm run db:migrate:remote
 ### 4. Generate and set the secrets
 
 ```bash
-openssl rand -base64 32   # value for ENCRYPTION_KEY
 openssl rand -hex 32      # value for CRON_SECRET
 ```
 
 Run each command below and paste the matching value when prompted:
 
 ```bash
-npx wrangler secret put ENCRYPTION_KEY
 npx wrangler secret put CRON_SECRET
 npx wrangler secret put EMAIL_API_KEY
 ```
 
 | Secret | What it does | Required? |
 | --- | --- | --- |
-| `ENCRYPTION_KEY` | Encrypts the Partner Access Tokens and the ingest key stored in D1 | Before you can connect a Partner account |
 | `CRON_SECRET` | Bootstrap fallback for signed ingest and `/api/cron/sync`. Day to day you use the ingest key below instead | Recommended |
 | `EMAIL_API_KEY` | Key for your email endpoint | Optional — without it, email is logged to the worker console instead of sent |
 
-> **`ENCRYPTION_KEY` cannot be rotated casually.** Changing it makes every stored
-> Partner Access Token undecryptable and they all have to be re-entered. Set it once
-> and keep a copy somewhere safe.
+> **Partner Access Tokens and the ingest key are stored in plaintext in D1.**
+> Encryption was removed after a lost `ENCRYPTION_KEY` orphaned every stored
+> secret; the key sat in the same Cloudflare account as the database, so it only
+> ever guarded against a dump leaking by itself. Treat any D1 export accordingly.
 
 **The ingest key is not a worker secret.** It is generated in the admin under
 **Apps → Ingest key**, stored encrypted in D1, and can be read back whenever you
@@ -158,7 +156,7 @@ npx wrangler d1 migrations list bee-affiliates --remote
 ## Local development
 
 ```bash
-cp .dev.vars.example .dev.vars   # fill in ENCRYPTION_KEY and CRON_SECRET
+cp .dev.vars.example .dev.vars   # fill in CRON_SECRET
 npm run db:migrate:local
 npm run dev
 ```

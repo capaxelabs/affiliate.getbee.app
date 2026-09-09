@@ -7,7 +7,6 @@ import {
 	referrals,
 	transactions
 } from '$lib/server/db/schema';
-import { decryptSecret } from '$lib/server/crypto';
 import { recordCommission, releaseMaturedCommissions } from './commission';
 import { normalizeShopDomain } from './referral';
 import { recordInstall, recordLifecycleHistory, upsertMerchant } from './merchant';
@@ -62,18 +61,18 @@ export async function failStaleRuns(db: DrizzleClient, olderThanMinutes = 15) {
 
 /** Every account we should sync, or just one when an id is given. */
 export async function syncableAccounts(db: DrizzleClient, partnerAccountId?: string) {
-	const filters = [eq(partnerAccounts.status, 'active'), isNotNull(partnerAccounts.apiTokenEncrypted)];
+	const filters = [eq(partnerAccounts.status, 'active'), isNotNull(partnerAccounts.apiToken)];
 	if (partnerAccountId) filters.push(eq(partnerAccounts.id, partnerAccountId));
 	return db.select().from(partnerAccounts).where(and(...filters)).orderBy(partnerAccounts.name);
 }
 
-async function credentialsFor(env: Env, account: Account): Promise<PartnerCredentials> {
-	if (!account.apiTokenEncrypted) {
+function credentialsFor(account: Account): PartnerCredentials {
+	if (!account.apiToken) {
 		throw new Error(`No Partner Access Token stored for ${account.name}.`);
 	}
 	return {
 		organizationId: account.organizationId,
-		apiToken: await decryptSecret(env, account.apiTokenEncrypted),
+		apiToken: account.apiToken,
 		apiVersion: account.apiVersion
 	};
 }
@@ -109,7 +108,7 @@ export async function syncApps(
 	let updated = 0;
 
 	try {
-		const credentials = await credentialsFor(env, account);
+		const credentials = credentialsFor(account);
 		const discovered = await discoverApps(credentials);
 		seen = discovered.length;
 
@@ -321,7 +320,7 @@ export async function syncTransactions(
 	let cursor: string | null = null;
 
 	try {
-		const credentials = await credentialsFor(env, account);
+		const credentials = credentialsFor(account);
 
 		// Only apps belonging to this account can match its transactions.
 		const appsByPartnerId = new Map<string, typeof apps.$inferSelect>();
@@ -502,7 +501,7 @@ export async function syncInstalls(
 	let matched = 0;
 
 	try {
-		const credentials = await credentialsFor(env, account);
+		const credentials = credentialsFor(account);
 		// Two years on the first run so churn history is not a blank slate.
 		const occurredAtMin = (await windowStart(db, account.id, 'installs', 730)).toISOString();
 

@@ -49,7 +49,7 @@ export async function readSignedBody(
 		return { ok: false, response: json({ error: 'Body must be JSON.' }, { status: 400 }) };
 	}
 
-	const candidates = [await getIngestKey(db, env), env?.CRON_SECRET].filter(
+	const candidates = [await getIngestKey(db), env?.CRON_SECRET].filter(
 		(candidate): candidate is string => Boolean(candidate)
 	);
 

@@ -156,14 +156,17 @@ but leaves existing ones earning.
 ## Partner accounts
 
 Several Shopify Partner organizations can be connected at once. `partner_accounts`
-holds the Partner Id and an AES-GCM encrypted Partner Access Token;
-`apps.partnerAccountId` says
+holds the Partner Id and the Partner Access Token; `apps.partnerAccountId` says
 which org an app lives under, and the sync runs once per account with that
 account's own credentials. Tokens are never sent to a browser — the UI shows only
 a masked hint and lets you replace them.
 
-`ENCRYPTION_KEY` must be set before tokens can be stored or read. Changing it makes
-every stored token undecryptable, so they would all need re-entering.
+**Stored credentials are plaintext.** They were AES-GCM encrypted under an
+`ENCRYPTION_KEY` worker secret until that key was lost, which orphaned every
+stored secret at once and killed the sync for three days. The key lived in the
+same Cloudflare account as the database, so it protected only against a dump
+leaking on its own, and on a single-operator install that was not worth the
+failure mode. Treat any D1 export as credential material.
 
 ## Attribution paths
 
@@ -273,10 +276,10 @@ POST /api/cron/sync[?task=lifecycle]   Authorization: Bearer $INGEST_KEY
 
 ## Secrets
 
-`wrangler secret put NAME` for: `EMAIL_API_KEY`, `CRON_SECRET`, `ENCRYPTION_KEY`.
+`wrangler secret put NAME` for: `EMAIL_API_KEY`, `CRON_SECRET`.
 
 **The ingest key is deliberately not a worker secret.** One key signs every app's
-webhooks and authorises the cron endpoint, and it lives encrypted in `settings`
+webhooks and authorises the cron endpoint, and it lives in `settings`
 so the admin can read it back — `wrangler secret put` is write-only, and nobody
 recovers a secret a week later to configure a new app. `src/lib/server/services/ingest-key.ts`
 owns it; `CRON_SECRET` stays as a fallback so anything set up before it keeps working.
@@ -291,7 +294,7 @@ delete them.
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **affiliate.getbee.app** (1022 symbols, 2088 relationships, 67 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **affiliate.getbee.app** (1053 symbols, 2144 relationships, 69 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > Index stale? Run `node .gitnexus/run.cjs analyze` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? `npx gitnexus analyze` (npm 11 crash → `npm i -g gitnexus`; #1939).
 

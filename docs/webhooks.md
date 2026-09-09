@@ -369,14 +369,10 @@ until an admin approves a manual claim.
 
 ### A 401 with the right key
 
-The ingest key is encrypted at rest with `ENCRYPTION_KEY`. If it was generated
-against a different environment than the one serving the request, the service
-cannot decrypt it, falls back to `CRON_SECRET`, and answers `401` while the
-admin still displays a hint for the key that is failing.
-
-`wrangler tail` reports this as `[ingest-key] stored key ••••abcd could not be
-decrypted`. The fix is to regenerate the key from the admin **on the environment
-that serves production**, then update every app.
+Each environment has its own `settings` row, so a key generated against local
+D1 is not the key production checks against. Compare the last four characters
+your app sends with the hint shown in Admin → Apps on the environment that
+served the request.
 
 Regenerating drops the old key immediately, so update all apps in the same
 sitting. Reporting is best effort everywhere, which means a stale key produces

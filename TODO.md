@@ -30,7 +30,7 @@ Three roles, one login (email magic-code):
 - [x] Generate migration `0000` and apply it to local D1
 - [x] Create the D1 database and paste `database_id` into wrangler.jsonc
       (`npx wrangler d1 create bee-affiliates`) — the only placeholder left
-- [x] Set the three secrets: `ENCRYPTION_KEY`, `CRON_SECRET`, `EMAIL_API_KEY`
+- [x] Set the secrets: `CRON_SECRET`, `EMAIL_API_KEY`
 
 ## Affiliate portal (`/app`)
 
@@ -89,13 +89,13 @@ Three roles, one login (email magic-code):
 ## Multiple partner accounts
 
 - [x] `partner_accounts` table; `apps.partnerAccountId` links each app to one org
-- [x] API tokens AES-GCM encrypted at rest, masked hint in the UI, never sent to a browser
+- [x] API tokens stored in D1, masked hint in the UI, never sent to a browser
 - [x] Sync loops over every active account with its own credentials, per-account
       resume window and error recorded on the account
 - [x] Admin → Partner accounts: connect, edit, rotate token, pause, disconnect
 - [x] One-click import of the legacy `PARTNER_ORG_ID` / `PARTNER_API_TOKEN` env vars
-- [x] Set `ENCRYPTION_KEY` before connecting accounts in production
-- [ ] After importing, delete the `PARTNER_*` worker secrets
+- [x] Drop at-rest encryption for stored credentials (see CLAUDE.md → Partner accounts)
+- [x] After importing, delete the `PARTNER_*` worker secrets
 
 ## App discovery and affiliate opt-in
 
@@ -122,14 +122,13 @@ Three roles, one login (email magic-code):
 
 ## Wire up in each Bee app
 
-- [ ] On OAuth install, POST to `/api/track/install` with the captured `ref` plus
+- [x] On OAuth install, POST to `/api/track/install` with the captured `ref` plus
       a `shop` object (name, email, ownerName, country, currency, plan). Signed
       with `X-Bee-Signature` HMAC-SHA256 of the raw body using the ingest key
       from Admin → Apps, set in the app as `AFFILIATES_SECRET`.
-      Without this, no merchant data, no lifecycle email, and every referral has
-      to go through a manual claim.
-- [ ] On `app/uninstalled`, POST to `/api/track/uninstall`. Optionally POST again
-      later with `reason` / `feedback` when the merchant replies to the survey.
+- [x] On `app/uninstalled`, POST to `/api/track/uninstall`.
+- [ ] POST again later with `reason` / `feedback` when a merchant replies to the
+      offboarding survey — nothing sends that survey yet, see below.
 
 ## Ingest key
 
@@ -154,13 +153,28 @@ Three roles, one login (email magic-code):
 
 ## Blocking real use
 
-- [ ] Generate the ingest key in Admin → Apps and set it as `AFFILIATES_SECRET`
-      in each Bee app. Until then the apps fall back to `CRON_SECRET`.
-- [ ] Turn **Affiliate** on for the apps you want promoted. Nothing affiliate-side
-      works until at least one is on — no links, no referrals, no commissions.
-- [ ] Add the reporter to RankFlo and Shootflo. Without it the 42 merchants have
-      no email address, so lifecycle mail cannot send and every referral needs a
-      manual claim.
+- [x] Ingest key generated in Admin → Apps and set as `AFFILIATES_SECRET` in each
+      Bee app
+- [x] Affiliate turned on for RankFlo and Shootflo Studio
+- [x] Reporter live in all 8 apps — 124 install records, 116 with a contactable
+      merchant
+- [ ] Turn welcome / offboarding email on per app in Admin → Apps. Both toggles
+      are off for every app, so `lifecycle_emails` has never queued a row and no
+      merchant has been mailed.
+- [ ] Recruit the first affiliate. The only account is the admin, whose own
+      affiliate record still sits on `pending`; 0 referrals and 0 commissions, so
+      the attribution path has never run end to end in production.
+- [ ] Only 2 Partner transactions exist, so commission generation is effectively
+      untested against real billing.
+- [ ] **Re-enter the Partner Access Token** in Admin → Partner accounts. The old
+      one was encrypted under a lost `ENCRYPTION_KEY` and migration `0010`
+      cleared it, so the sync has skipped the account since 2026-09-06.
+- [ ] **Restore the ingest key.** Migration `0010` deleted the unreadable row.
+      Either paste the plaintext an app still holds back into `settings`, or
+      regenerate from Admin → Apps and update `AFFILIATES_SECRET` in all 8 apps.
+- [ ] Delete the `ENCRYPTION_KEY` worker secret once the above is done.
+- [ ] Re-run `scripts/backfill-affiliates.mjs` per app to refill merchant contact
+      details missed while ingest was failing.
 
 ## Next
 

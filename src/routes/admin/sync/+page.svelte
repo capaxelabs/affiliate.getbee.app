@@ -60,13 +60,6 @@
 </PageHeader>
 
 <div class="space-y-5 px-5 pb-10 sm:px-8">
-	{#if !data.encryptionReady}
-		<div class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-			<code class="font-mono">ENCRYPTION_KEY</code> is not set, so stored Partner Access Tokens
-			cannot be read.
-		</div>
-	{/if}
-
 	{#if data.untracked > 0}
 		<div class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
 			{data.untracked}

@@ -69,8 +69,7 @@ export const loginCodes = sqliteTable(
 
 /**
  * A Shopify Partner organization. Several can be connected at once; each app
- * belongs to exactly one. The Partner Access Token is encrypted at rest and never leaves
- * the server.
+ * belongs to exactly one. The Partner Access Token never leaves the server.
  */
 export const partnerAccounts = sqliteTable(
 	'partner_accounts',
@@ -80,8 +79,8 @@ export const partnerAccounts = sqliteTable(
 			.$defaultFn(() => newId('pac')),
 		name: text('name').notNull(),
 		organizationId: text('organization_id').notNull(),
-		/** AES-GCM ciphertext, never rendered to a browser. */
-		apiTokenEncrypted: text('api_token_encrypted'),
+		/** The Partner Access Token itself. Never rendered to a browser. */
+		apiToken: text('api_token'),
 		/** Last 4 characters, so the UI can show which token is stored. */
 		apiTokenHint: text('api_token_hint'),
 		apiVersion: text('api_version').notNull().default('2026-07'),
@@ -757,7 +756,7 @@ export const payoutsRelations = relations(payouts, ({ one, many }) => ({
  *
  * `ingest_key` lives here rather than as a worker secret because a secret is
  * write-only: nobody can recover it a week later to configure a new app. It is
- * encrypted with ENCRYPTION_KEY, revealed on demand in the admin, and rotatable.
+ * revealed on demand in the admin, and rotatable.
  */
 export const settings = sqliteTable('settings', {
 	key: text('key').primaryKey(),

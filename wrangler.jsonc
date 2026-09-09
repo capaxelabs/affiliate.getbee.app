@@ -51,7 +51,6 @@
 	//   PARTNER_ORG_ID    — Shopify Partner organization id
 	//   PARTNER_API_TOKEN — Shopify Partner API access token
 	//   CRON_SECRET       — bearer token for POST /api/cron/sync
-	//   ENCRYPTION_KEY    — passphrase used to encrypt Partner API tokens in D1
 	//
 	// Scheduling: adapter-cloudflare only exports a fetch handler, so there is no
 	// scheduled() hook. Point any scheduler at POST /api/cron/sync with

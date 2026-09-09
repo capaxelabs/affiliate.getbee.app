@@ -4,7 +4,6 @@ import { requireOwner } from '$lib/server/scope';
 import { apps, partnerAccounts, partnerSyncRuns } from '$lib/server/db/schema';
 import { runFullSync, syncableAccounts, syncInstalls, syncTransactions } from '$lib/server/services/sync';
 import { lifecycleEmailStats, processLifecycleEmails } from '$lib/server/services/lifecycle';
-import { encryptionConfigured } from '$lib/server/crypto';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async (event) => {
@@ -38,14 +37,13 @@ export const load: PageServerLoad = async (event) => {
 			name: a.name,
 			organizationId: a.organizationId,
 			status: a.status,
-			hasToken: Boolean(a.apiTokenEncrypted),
+			hasToken: Boolean(a.apiToken),
 			lastSyncedAt: a.lastSyncedAt,
 			lastSyncError: a.lastSyncError,
 			appCount: allApps.filter((app) => app.partnerAccountId === a.id).length
 		})),
 		emailStats,
 		syncableCount: syncable.length,
-		encryptionReady: encryptionConfigured(event.platform!.env),
 		untracked: allApps.filter((a) => !a.partnerAppId || !a.partnerAccountId).length
 	};
 };

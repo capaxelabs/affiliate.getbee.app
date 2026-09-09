@@ -3,7 +3,6 @@
 
 # Encrypts Shopify Partner API tokens stored in D1.
 # Required before you can connect a Partner account.
-ENCRYPTION_KEY=local-dev-encryption-key
 
 # Signs install/uninstall calls from your apps and guards POST /api/cron/sync.
 CRON_SECRET=local-dev-secret

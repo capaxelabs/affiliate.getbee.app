@@ -20,7 +20,7 @@ import type { RequestHandler } from './$types';
  */
 export const POST: RequestHandler = async ({ request, url, locals, platform }) => {
 	const accepted = [
-		await getIngestKey(locals.db, platform!.env),
+		await getIngestKey(locals.db),
 		platform?.env?.CRON_SECRET
 	].filter(Boolean);
 	if (!accepted.length) return json({ error: 'Sync is not configured.' }, { status: 503 });

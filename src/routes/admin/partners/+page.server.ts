@@ -3,7 +3,7 @@ import { count, desc, eq, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { requireOwner } from '$lib/server/scope';
 import { apps, auditLog, partnerAccounts, partnerSyncRuns } from '$lib/server/db/schema';
-import { encryptSecret, encryptionConfigured, tokenHint, EncryptionError } from '$lib/server/crypto';
+import { tokenHint } from '$lib/server/secrets';
 import { syncApps } from '$lib/server/services/sync';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -36,14 +36,13 @@ export const load: PageServerLoad = async (event) => {
 	return {
 		accounts: accounts.map((row) => ({
 			...row.account,
-			// Never send the ciphertext to a browser.
-			apiTokenEncrypted: undefined,
-			hasToken: Boolean(row.account.apiTokenEncrypted),
+			// The token never goes to a browser; the hint is enough to identify it.
+			apiToken: undefined,
+			hasToken: Boolean(row.account.apiToken),
 			appCount: Number(row.appCount ?? 0),
 			lastRun: row.lastRun ? new Date(Number(row.lastRun) * 1000) : null
 		})),
 		unassignedApps: Number(unassigned[0]?.value ?? 0),
-		encryptionReady: encryptionConfigured(env),
 		canImportFromEnv,
 		defaultApiVersion: env?.PARTNER_API_VERSION ?? '2026-07'
 	};
@@ -84,47 +83,42 @@ export const actions: Actions = {
 			.limit(1);
 		if (clash) return fail(409, { error: 'That Partner Id is already connected.' });
 
-		try {
-			const [created] = await event.locals.db
-				.insert(partnerAccounts)
-				.values({
-					name: parsed.data.name,
-					organizationId: parsed.data.organizationId,
-					apiVersion: parsed.data.apiVersion || env.PARTNER_API_VERSION || '2026-07',
-					apiTokenEncrypted: await encryptSecret(env, parsed.data.apiToken),
-					apiTokenHint: tokenHint(parsed.data.apiToken),
-					status: parsed.data.status
-				})
-				.returning();
+		const [created] = await event.locals.db
+			.insert(partnerAccounts)
+			.values({
+				name: parsed.data.name,
+				organizationId: parsed.data.organizationId,
+				apiVersion: parsed.data.apiVersion || env.PARTNER_API_VERSION || '2026-07',
+				apiToken: parsed.data.apiToken,
+				apiTokenHint: tokenHint(parsed.data.apiToken),
+				status: parsed.data.status
+			})
+			.returning();
 
-			await event.locals.db.insert(auditLog).values({
-				actorUserId: owner.userId,
-				action: 'partner_account.create',
-				entityType: 'partner_account',
-				entityId: created.id,
-				metadata: { name: created.name, organizationId: created.organizationId }
-			});
+		await event.locals.db.insert(auditLog).values({
+			actorUserId: owner.userId,
+			action: 'partner_account.create',
+			entityType: 'partner_account',
+			entityId: created.id,
+			metadata: { name: created.name, organizationId: created.organizationId }
+		});
 
-			// Pull the account's apps straight away so there is nothing to add by hand.
-			const discovered = await syncApps(event.locals.db, env, created);
+		// Pull the account's apps straight away so there is nothing to add by hand.
+		const discovered = await syncApps(event.locals.db, env, created);
 
-			if (discovered.status === 'failed') {
-				return {
-					success: true,
-					message: `${created.name} connected, but fetching its apps failed: ${discovered.error}`
-				};
-			}
-
+		if (discovered.status === 'failed') {
 			return {
 				success: true,
-				message: discovered.created
-					? `${created.name} connected — found ${discovered.created} app${discovered.created === 1 ? '' : 's'}. Switch on Affiliate for the ones you want promoted.`
-					: `${created.name} connected. No apps found on that Partner account.`
+				message: `${created.name} connected, but fetching its apps failed: ${discovered.error}`
 			};
-		} catch (error) {
-			if (error instanceof EncryptionError) return fail(503, { error: error.message });
-			throw error;
 		}
+
+		return {
+			success: true,
+			message: discovered.created
+				? `${created.name} connected — found ${discovered.created} app${discovered.created === 1 ? '' : 's'}. Switch on Affiliate for the ones you want promoted.`
+				: `${created.name} connected. No apps found on that Partner account.`
+		};
 	},
 
 	update: async (event) => {
@@ -154,14 +148,9 @@ export const actions: Actions = {
 
 		// An empty token field leaves the stored one alone.
 		if (parsed.data.apiToken) {
-			try {
-				patch.apiTokenEncrypted = await encryptSecret(env, parsed.data.apiToken);
-				patch.apiTokenHint = tokenHint(parsed.data.apiToken);
-				patch.lastSyncError = null;
-			} catch (error) {
-				if (error instanceof EncryptionError) return fail(503, { error: error.message });
-				throw error;
-			}
+			patch.apiToken = parsed.data.apiToken;
+			patch.apiTokenHint = tokenHint(parsed.data.apiToken);
+			patch.lastSyncError = null;
 		}
 
 		await event.locals.db.update(partnerAccounts).set(patch).where(eq(partnerAccounts.id, id));
@@ -201,43 +190,38 @@ export const actions: Actions = {
 			.limit(1);
 		if (existing) return fail(409, { error: 'Accounts already exist; add the next one manually.' });
 
-		try {
-			const [created] = await event.locals.db
-				.insert(partnerAccounts)
-				.values({
-					name: 'Imported from environment',
-					organizationId: env.PARTNER_ORG_ID,
-					apiVersion: env.PARTNER_API_VERSION || '2026-07',
-					apiTokenEncrypted: await encryptSecret(env, env.PARTNER_API_TOKEN),
-					apiTokenHint: tokenHint(env.PARTNER_API_TOKEN)
-				})
-				.returning();
+		const [created] = await event.locals.db
+			.insert(partnerAccounts)
+			.values({
+				name: 'Imported from environment',
+				organizationId: env.PARTNER_ORG_ID,
+				apiVersion: env.PARTNER_API_VERSION || '2026-07',
+				apiToken: env.PARTNER_API_TOKEN,
+				apiTokenHint: tokenHint(env.PARTNER_API_TOKEN)
+			})
+			.returning();
 
-			// Adopt every app that has no account yet — before this there was only one.
-			await event.locals.db
-				.update(apps)
-				.set({ partnerAccountId: created.id, updatedAt: new Date() })
-				.where(sql`${apps.partnerAccountId} is null`);
+		// Adopt every app that has no account yet — before this there was only one.
+		await event.locals.db
+			.update(apps)
+			.set({ partnerAccountId: created.id, updatedAt: new Date() })
+			.where(sql`${apps.partnerAccountId} is null`);
 
-			await event.locals.db.insert(auditLog).values({
-				actorUserId: owner.userId,
-				action: 'partner_account.import_env',
-				entityType: 'partner_account',
-				entityId: created.id
-			});
+		await event.locals.db.insert(auditLog).values({
+			actorUserId: owner.userId,
+			action: 'partner_account.import_env',
+			entityType: 'partner_account',
+			entityId: created.id
+		});
 
-			const discovered = await syncApps(event.locals.db, env, created);
+		const discovered = await syncApps(event.locals.db, env, created);
 
-			return {
-				success: true,
-				message: discovered.created
-					? `Imported and found ${discovered.created} app${discovered.created === 1 ? '' : 's'}. Rename the account, then remove the PARTNER_* worker secrets.`
-					: 'Imported. Rename it, then remove the PARTNER_* worker secrets.'
-			};
-		} catch (error) {
-			if (error instanceof EncryptionError) return fail(503, { error: error.message });
-			throw error;
-		}
+		return {
+			success: true,
+			message: discovered.created
+				? `Imported and found ${discovered.created} app${discovered.created === 1 ? '' : 's'}. Rename the account, then remove the PARTNER_* worker secrets.`
+				: 'Imported. Rename it, then remove the PARTNER_* worker secrets.'
+		};
 	},
 
 	remove: async (event) => {
