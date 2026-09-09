@@ -166,12 +166,10 @@ Three roles, one login (email magic-code):
       the attribution path has never run end to end in production.
 - [ ] Only 2 Partner transactions exist, so commission generation is effectively
       untested against real billing.
-- [ ] **Re-enter the Partner Access Token** in Admin → Partner accounts. The old
-      one was encrypted under a lost `ENCRYPTION_KEY` and migration `0010`
-      cleared it, so the sync has skipped the account since 2026-09-06.
-- [ ] **Restore the ingest key.** Migration `0010` deleted the unreadable row.
-      Either paste the plaintext an app still holds back into `settings`, or
-      regenerate from Admin → Apps and update `AFFILIATES_SECRET` in all 8 apps.
+- [x] Re-entered the Partner Access Token; the first manual sync since 2026-09-06
+      succeeded on 2026-09-09 and backfilled the gap.
+- [x] Restored the ingest key from the plaintext an app still held, so the hint is
+      `••••5efa` again and no app needed updating.
 - [ ] Delete the `ENCRYPTION_KEY` worker secret once the above is done.
 - [ ] Re-run `scripts/backfill-affiliates.mjs` per app to refill merchant contact
       details missed while ingest was failing.

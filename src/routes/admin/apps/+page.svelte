@@ -35,6 +35,7 @@
 
 	// Only ever held in memory, never in the page data.
 	let revealed = $state<string | null>(null);
+	let confirmKey = $state(false);
 
 	$effect(() => {
 		if (form && 'ingestKey' in form && form.ingestKey) revealed = form.ingestKey as string;
@@ -86,6 +87,13 @@
 
 	const keyAction = () => async ({ result, update }: any) => {
 		if (result.type === 'failure') toast.error(result.data?.error ?? 'Could not read that key.');
+		if (result.type === 'success' && result.data?.message) toast.success(result.data.message);
+		await update({ reset: false });
+	};
+
+	const rotateKey = () => async ({ result, update }: any) => {
+		confirmKey = false;
+		if (result.type === 'failure') toast.error(result.data?.error ?? 'Could not rotate that key.');
 		if (result.type === 'success' && result.data?.message) toast.success(result.data.message);
 		await update({ reset: false });
 	};
@@ -159,17 +167,14 @@
 						<Button type="submit" size="sm" variant="outline">Show</Button>
 					</form>
 				{/if}
-				<form method="POST" action="?/regenerateIngestKey" use:enhance={keyAction}>
-					<Button type="submit" size="sm" variant="ghost">
-						{data.ingestKeyHint ? 'Regenerate' : 'Generate'}
-					</Button>
-				</form>
+				<Button size="sm" variant="ghost" onclick={() => (confirmKey = true)}>
+					{data.ingestKeyHint ? 'Regenerate' : 'Generate'}
+				</Button>
 			</div>
 			<p class="mt-2 text-xs text-muted-foreground">
 				One key for everything. Every app signs its install and uninstall webhooks with it
 				(set it as <code class="font-mono">AFFILIATES_SECRET</code>), and the cron endpoint takes
-				it as a bearer token. Regenerating stops the old key working straight away, so every app
-				has to be updated.
+				it as a bearer token.
 			</p>
 		</div>
 	{/if}
@@ -520,5 +525,35 @@
 				<Button type="submit">{editing ? 'Save changes' : 'Add app'}</Button>
 			</Dialog.Footer>
 		</form>
+	</Dialog.Content>
+</Dialog.Root>
+
+<Dialog.Root bind:open={confirmKey}>
+	<Dialog.Content class="sm:max-w-md">
+		<Dialog.Header>
+			<Dialog.Title>
+				{data.ingestKeyHint ? 'Regenerate the ingest key?' : 'Generate the ingest key?'}
+			</Dialog.Title>
+			<Dialog.Description>
+				{#if data.ingestKeyHint}
+					The current key stops working the moment you do this. Every Bee app signs its install
+					and uninstall webhooks with it, so until you copy the new value into
+					<code class="font-mono">AFFILIATES_SECRET</code> in all of them and redeploy, their
+					webhooks are rejected with a 401 and no data reaches this dashboard.
+				{:else}
+					Copy the key as soon as it appears and set it as
+					<code class="font-mono">AFFILIATES_SECRET</code> in every Bee app. Until an app has it,
+					its install and uninstall webhooks are rejected with a 401 and send nothing.
+				{/if}
+			</Dialog.Description>
+		</Dialog.Header>
+		<Dialog.Footer>
+			<Button type="button" variant="outline" onclick={() => (confirmKey = false)}>Cancel</Button>
+			<form method="POST" action="?/regenerateIngestKey" use:enhance={rotateKey}>
+				<Button type="submit" variant={data.ingestKeyHint ? 'destructive' : 'default'}>
+					{data.ingestKeyHint ? 'Regenerate' : 'Generate'}
+				</Button>
+			</form>
+		</Dialog.Footer>
 	</Dialog.Content>
 </Dialog.Root>
