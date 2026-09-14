@@ -20,9 +20,10 @@
 	const backfillForms: Record<string, HTMLFormElement> = {};
 
 	/**
-	 * One request backfills two apps — the Workers subrequest cap kills anything
-	 * greedier — so the form resubmits itself until the server reports nothing
-	 * left. One click walks the whole account.
+	 * One request backfills one app — the Workers subrequest cap kills anything
+	 * greedier, and one app per request gives the whole budget to whichever app
+	 * has the deepest history. The form resubmits itself until the server
+	 * reports nothing left, so one click walks the whole account.
 	 */
 	const runBackfill = (key: string) => () => {
 		running = key;
@@ -176,7 +177,7 @@
 										size="sm"
 										variant="ghost"
 										disabled={!account.hasToken || running !== null}
-										title="Re-reads every app's full install and charge history, two apps per request, until all are done"
+										title="Re-reads every app's full install and charge history, one app per request, until all are done"
 									>
 										{#if running === `b-${account.id}`}
 											<LoaderIcon class="size-3.5 animate-spin" />

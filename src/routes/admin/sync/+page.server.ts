@@ -108,11 +108,13 @@ export const actions: Actions = {
 			.limit(1);
 		if (!account) return fail(400, { error: 'Pick a partner account.' });
 
-		// Two apps per request, full history each. Reading every app at once is
-		// thousands of D1 calls, and a Worker request dies at the subrequest cap —
-		// so the page resubmits until `remaining` reaches zero instead.
+		// One app per request, full history. A Worker request dies at the
+		// subrequest cap, and one app is the unit that keeps the whole budget for
+		// whichever app turns out to be huge — the page resubmits until
+		// `remaining` reaches zero, so an account with many apps just takes more
+		// requests, not bigger ones.
 		const installs = await syncInstalls(event.locals.db, event.platform!.env, account, 'manual', {
-			maxBackfills: 2
+			maxBackfills: 1
 		});
 		const txns = await syncTransactions(event.locals.db, event.platform!.env, account, 'manual');
 

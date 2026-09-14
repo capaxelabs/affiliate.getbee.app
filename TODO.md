@@ -186,9 +186,10 @@ Three roles, one login (email magic-code):
       02:55 inherited a 24-hour window and never saw their history. One backfill
       per run keeps the Workers subrequest cap out of it.
 - [x] "Backfill all" on Admin → Sync: one click re-reads every app's full
-      install and charge history. Two apps per request under the Workers
-      subrequest cap; the form resubmits itself until the server reports
-      nothing left. (Replaced the date field — a locale-dependent date input
+      install and charge history. One app per request, so the Workers
+      subrequest budget always belongs to a single app however deep its
+      history; the form resubmits itself until the server reports nothing
+      left. (Replaced the date field — a locale-dependent date input
       silently refused to submit.)
 - [x] Transaction watermark widened to a 14-day floor. Shopify publishes a
       transaction days after the `createdAt` it stamps on it, so a one-day overlap
