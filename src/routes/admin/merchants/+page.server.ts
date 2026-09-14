@@ -4,7 +4,7 @@ import { apps, installs, merchants } from '$lib/server/db/schema';
 import { merchantTotals } from '$lib/server/services/stats';
 import type { PageServerLoad } from './$types';
 
-const STATUSES = ['installed', 'uninstalled'] as const;
+const STATUSES = ['installed', 'uninstalled', 'closed'] as const;
 
 export const load: PageServerLoad = async (event) => {
 	const scope = await requireAdminAccess(event);

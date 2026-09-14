@@ -15,7 +15,7 @@
 	import SearchIcon from '@lucide/svelte/icons/search';
 	import ExternalLinkIcon from '@lucide/svelte/icons/external-link';
 	import StoreIcon from '@lucide/svelte/icons/store';
-	import { money, shortDate, humanize, plural } from '$lib/format';
+	import { INSTALL_STATUS_LABEL, money, shortDate, humanize, plural } from '$lib/format';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
@@ -50,7 +50,7 @@
 	});
 
 	const statusLabel = $derived(
-		status === 'all' ? 'Any status' : status === 'installed' ? 'Installed' : 'Uninstalled'
+		status === 'all' ? 'Any status' : (INSTALL_STATUS_LABEL[status] ?? 'Any status')
 	);
 	const countryLabel = $derived(country === 'all' ? 'Any country' : country);
 	const planLabel = $derived(plan === 'all' ? 'Any plan' : plan);
@@ -207,6 +207,7 @@
 					<Select.Item value="all" label="Any status">Any status</Select.Item>
 					<Select.Item value="installed" label="Installed">Installed</Select.Item>
 					<Select.Item value="uninstalled" label="Uninstalled">Uninstalled</Select.Item>
+					<Select.Item value="closed" label="Store closed">Store closed</Select.Item>
 				</Select.Content>
 			</Select.Root>
 
@@ -305,7 +306,7 @@
 								<Table.Cell>
 									<StatusBadge
 										status={row.status === 'installed' ? 'active' : 'churned'}
-										label={row.status === 'installed' ? 'Installed' : 'Uninstalled'}
+										label={INSTALL_STATUS_LABEL[row.status] ?? row.status}
 									/>
 									{#if row.uninstallReason}
 										<span class="mt-0.5 block max-w-40 truncate text-xs text-muted-foreground">

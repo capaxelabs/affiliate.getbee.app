@@ -78,6 +78,13 @@
       "when": 1788668929581,
       "tag": "0010_plaintext_secrets",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1789366636960,
+      "tag": "0011_gorgeous_shadow_king",
+      "breakpoints": true
     }
   ]
 }

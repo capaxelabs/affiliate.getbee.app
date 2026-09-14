@@ -90,6 +90,50 @@ export const actions: Actions = {
 		};
 	},
 
+	/**
+	 * Re-reads everything since a date, ignoring the incremental watermark. The
+	 * only way to recover a record Shopify published late, or an app whose
+	 * history predates its first sync.
+	 */
+	backfill: async (event) => {
+		await requireOwner(event);
+		const form = await event.request.formData();
+		const id = String(form.get('partnerAccountId') ?? '');
+		const since = String(form.get('since') ?? '');
+
+		if (!id) return fail(400, { error: 'Pick a partner account.' });
+		const from = new Date(`${since}T00:00:00Z`);
+		if (!since || Number.isNaN(from.getTime())) {
+			return fail(400, { error: 'Pick a date to backfill from.' });
+		}
+		if (from.getTime() > Date.now()) {
+			return fail(400, { error: 'That date is in the future.' });
+		}
+
+		const [account] = await event.locals.db
+			.select()
+			.from(partnerAccounts)
+			.where(eq(partnerAccounts.id, id))
+			.limit(1);
+		if (!account) return fail(400, { error: 'Pick a partner account.' });
+
+		const installs = await syncInstalls(event.locals.db, event.platform!.env, account, 'manual', {
+			since: from
+		});
+		const txns = await syncTransactions(event.locals.db, event.platform!.env, account, 'manual', {
+			since: from
+		});
+
+		const failed = [installs, txns].filter((r) => r.status === 'failed');
+
+		return {
+			success: failed.length === 0,
+			message: failed.length
+				? (failed[0].error ?? 'Backfill failed.')
+				: `${account.name}: ${installs.recordsSeen} events, ${txns.recordsSeen} transactions, ${txns.commissionsCreated} commissions since ${since}.`
+		};
+	},
+
 	syncAll: async (event) => {
 		await requireOwner(event);
 		const result = await runFullSync(event.locals.db, event.platform!.env, 'manual');

@@ -440,6 +440,8 @@ export type AppRevenueRow = {
 	activeInstalls: number;
 	totalInstalls: number;
 	churnedInstalls: number;
+	/** Shops Shopify closed or froze. Not churn, but not active either. */
+	closedInstalls: number;
 	commissionCents: number;
 };
 
@@ -475,6 +477,9 @@ export async function revenueByApp(
 			churnedInstalls: sql<number>`(
 				select count(*) from installs i where i.app_id = apps.id and i.status = 'uninstalled'
 			)`,
+			closedInstalls: sql<number>`(
+				select count(*) from installs i where i.app_id = apps.id and i.status = 'closed'
+			)`,
 			commissionCents: sql<number>`(
 				select coalesce(sum(c.amount_cents), 0) from commissions c where c.app_id = apps.id
 			)`
@@ -491,6 +496,7 @@ export async function revenueByApp(
 		activeInstalls: zero(r.activeInstalls),
 		totalInstalls: zero(r.totalInstalls),
 		churnedInstalls: zero(r.churnedInstalls),
+		closedInstalls: zero(r.closedInstalls),
 		commissionCents: zero(r.commissionCents)
 	}));
 }
@@ -524,9 +530,10 @@ export async function revenueSeries(db: DrizzleClient, scope: AppScope = null, m
 export type LifecyclePoint = { period: string; installed: number; uninstalled: number };
 
 /**
- * Installs and uninstalls by month for one app, read from the event trail
+ * Installs and departures by month for one app, read from the event trail
  * rather than the install row — `installs` only remembers the latest state, so
  * a shop that left and came back would otherwise vanish from its first month.
+ * A shop Shopify closed counts as a departure alongside a real uninstall.
  */
 export async function appLifecycleSeries(
 	db: DrizzleClient,
@@ -546,7 +553,7 @@ export async function appLifecycleSeries(
 			and(
 				eq(installEvents.appId, appId),
 				gte(installEvents.occurredAt, from),
-				inArray(installEvents.type, ['installed', 'uninstalled'])
+				inArray(installEvents.type, ['installed', 'uninstalled', 'deactivated'])
 			)
 		)
 		.groupBy(period, installEvents.type);
@@ -554,8 +561,9 @@ export async function appLifecycleSeries(
 	const byPeriod = new Map<string, LifecyclePoint>();
 	for (const row of rows) {
 		const point = byPeriod.get(row.period) ?? { period: row.period, installed: 0, uninstalled: 0 };
-		if (row.type === 'installed') point.installed = zero(row.value);
-		else point.uninstalled = zero(row.value);
+		if (row.type === 'installed') point.installed += zero(row.value);
+		// Departures are installs lost either way, so a closed shop lands here too.
+		else point.uninstalled += zero(row.value);
 		byPeriod.set(row.period, point);
 	}
 
@@ -566,6 +574,7 @@ export type MerchantTotals = {
 	total: number;
 	activeInstalls: number;
 	churnedInstalls: number;
+	closedInstalls: number;
 	newThisMonth: number;
 	withEmail: number;
 };
@@ -616,6 +625,7 @@ export async function merchantTotals(
 		total: zero(total[0]?.value),
 		activeInstalls: statuses.get('installed') ?? 0,
 		churnedInstalls: statuses.get('uninstalled') ?? 0,
+		closedInstalls: statuses.get('closed') ?? 0,
 		newThisMonth: zero(recent[0]?.value),
 		withEmail: zero(contactable[0]?.value)
 	};

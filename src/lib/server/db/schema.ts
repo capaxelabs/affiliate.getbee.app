@@ -154,6 +154,12 @@ export const apps = sqliteTable(
 		offboardEmailEnabled: integer('offboard_email_enabled', { mode: 'boolean' })
 			.notNull()
 			.default(false),
+		/**
+		 * How far the relationship-event sync has read for this app. Per app, not
+		 * per account: an app linked after the account's first sync used to inherit
+		 * the account's watermark and so never saw its own history.
+		 */
+		eventsSyncedAt: integer('events_synced_at', { mode: 'timestamp' }),
 		...timestamps
 	},
 	(t) => [
@@ -207,7 +213,13 @@ export const installs = sqliteTable(
 		merchantId: text('merchant_id')
 			.notNull()
 			.references(() => merchants.id, { onDelete: 'cascade' }),
-		status: text('status', { enum: ['installed', 'uninstalled'] })
+		/**
+		 * `closed` is a shop Shopify deactivated — closed, frozen or otherwise
+		 * suspended. It never fires an uninstall, so folding it into `installed`
+		 * left dead shops counted as active forever, and folding it into
+		 * `uninstalled` would report a merchant decision they never made.
+		 */
+		status: text('status', { enum: ['installed', 'uninstalled', 'closed'] })
 			.notNull()
 			.default('installed'),
 		installedAt: integer('installed_at', { mode: 'timestamp' }).notNull().default(now),
@@ -250,7 +262,7 @@ export const installEvents = sqliteTable(
 		 * is what makes replaying a history idempotent.
 		 */
 		type: text('type', {
-			enum: ['installed', 'uninstalled', 'plan_changed', 'feedback']
+			enum: ['installed', 'uninstalled', 'deactivated', 'plan_changed', 'feedback']
 		}).notNull(),
 		source: text('source', { enum: ['ingest', 'partner_api', 'manual'] })
 			.notNull()

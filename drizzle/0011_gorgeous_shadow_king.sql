@@ -1,0 +1,1 @@
+ALTER TABLE `apps` ADD `events_synced_at` integer;

@@ -174,6 +174,42 @@ Three roles, one login (email magic-code):
 - [ ] Re-run `scripts/backfill-affiliates.mjs` per app to refill merchant contact
       details missed while ingest was failing.
 
+## Sync accuracy (found 2026-09-14, comparing admin vs Partner dashboard)
+
+- [x] Query `RELATIONSHIP_DEACTIVATED` alongside install/uninstall/reactivate.
+      A closed or frozen store never fires `RelationshipUninstalled`, so it stayed
+      `installed` forever — 27 stale rows, Shootflo reading 27 active against
+      Shopify's 18. `install_events.type` gains `deactivated`, `installs.status`
+      gains `closed`, and the dashboard has its own Closed column.
+- [x] Per-app relationship-event window (`apps.events_synced_at`). The 730-day
+      first-run window was per account, so the six apps linked after 2026-09-05
+      02:55 inherited a 24-hour window and never saw their history. One backfill
+      per run keeps the Workers subrequest cap out of it.
+- [x] Backfill-from-date action on Admin → Sync, per partner account.
+- [x] Transaction watermark widened to a 14-day floor. Shopify publishes a
+      transaction days after the `createdAt` it stamps on it, so a one-day overlap
+      let AppOneTimeSale/788271547 (2026-09-07, $24.27 net) fall behind the
+      watermark permanently.
+- [x] Ignore `app-review-*.myshopify.com` and `redacted.myshopify.com` at
+      `upsertMerchant`, so neither ingest nor sync can create them.
+- [ ] Delete the 15 existing internal merchant rows (19 installs, 51 events).
+      Nothing references them: 0 transactions, 0 referrals, 0 lifecycle emails.
+- [ ] Backfill production once the fix is deployed, then re-check the eight
+      install counts against the Partner dashboard.
+- [ ] App names never refresh for apps with no transactions, so the admin still
+      shows "Bee GST Invoice", "Bee Gifting", "Bee Migration" where Shopify has
+      "Bee Invoices", "Bee secret gift", "Bee Migrate".
+
+## Committed vs collected revenue
+
+- [ ] `transactions` only carries money Shopify has actually billed. An app
+      subscription bills at the end of its 30-day cycle, so the $200/month Elite
+      Plan activated 2026-09-12 on t4m9kj-bx has `billingOn: 2026-10-12` and no
+      transaction until then — which is why Shopify's own Earnings column says
+      $48.54 too. Read `app.events` SUBSCRIPTION_CHARGE_ACTIVATED / CANCELED /
+      FROZEN / EXPIRED / DECLINED and ONE_TIME_CHARGE_* to show committed MRR
+      beside collected revenue.
+
 ## Next
 
 - [ ] Merchant detail page (timeline of install events, revenue, emails sent)

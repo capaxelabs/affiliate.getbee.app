@@ -8,7 +8,7 @@ import type { PageServerLoad } from './$types';
 /** Merchants per page. Small enough that the page stays quick on D1. */
 const PAGE_SIZE = 25;
 
-const STATUSES = ['installed', 'uninstalled'] as const;
+const STATUSES = ['installed', 'uninstalled', 'closed'] as const;
 const ATTRIBUTION = ['referred', 'organic'] as const;
 
 const oneOf = <T extends readonly string[]>(list: T, value: string | null) =>

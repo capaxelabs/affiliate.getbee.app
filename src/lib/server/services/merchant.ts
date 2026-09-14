@@ -1,7 +1,7 @@
 import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import type { DrizzleClient } from '$lib/server/db';
 import { apps, installEvents, installs, merchants } from '$lib/server/db/schema';
-import { normalizeShopDomain } from './referral';
+import { isInternalShop, normalizeShopDomain } from './referral';
 import { queueLifecycleEmail } from './lifecycle';
 
 export type MerchantProfile = {
@@ -24,7 +24,7 @@ export type MerchantProfile = {
  */
 export async function upsertMerchant(db: DrizzleClient, profile: MerchantProfile, seenAt = new Date()) {
 	const shopDomain = normalizeShopDomain(profile.shopDomain);
-	if (!shopDomain) return null;
+	if (!shopDomain || isInternalShop(shopDomain)) return null;
 
 	const [existing] = await db
 		.select()
@@ -100,7 +100,7 @@ async function applyLifecycleEvent(
 		installId: string;
 		appId: string;
 		merchantId: string;
-		type: 'installed' | 'uninstalled' | 'feedback' | 'plan_changed';
+		type: 'installed' | 'uninstalled' | 'deactivated' | 'feedback' | 'plan_changed';
 		occurredAt: Date;
 		source: 'ingest' | 'partner_api' | 'manual';
 		metadata?: Record<string, unknown> | null;
@@ -124,25 +124,35 @@ async function applyLifecycleEvent(
 
 	const isNew = inserted.length > 0;
 
-	// Only install and uninstall move the state; feedback and plan changes do not.
-	if (options.type === 'installed' || options.type === 'uninstalled') {
+	// Only the three relationship events move the state; feedback and plan
+	// changes do not.
+	if (STATE_EVENTS.includes(options.type as StateEvent)) {
 		await rebuildInstallState(db, options.installId);
 	}
 
 	return isNew;
 }
 
+/**
+ * The event types that decide install status. `deactivated` is Shopify closing
+ * or freezing the shop — it arrives instead of an uninstall, never alongside
+ * one, so a trail that ends there is neither installed nor churned.
+ */
+const STATE_EVENTS = ['installed', 'uninstalled', 'deactivated'] as const;
+type StateEvent = (typeof STATE_EVENTS)[number];
+
+export const STATUS_FOR_EVENT: Record<StateEvent, 'installed' | 'uninstalled' | 'closed'> = {
+	installed: 'installed',
+	uninstalled: 'uninstalled',
+	deactivated: 'closed'
+};
+
 /** Derives status, timestamps and install count from the event trail. */
 async function rebuildInstallState(db: DrizzleClient, installId: string) {
 	const events = await db
 		.select({ type: installEvents.type, occurredAt: installEvents.occurredAt })
 		.from(installEvents)
-		.where(
-			and(
-				eq(installEvents.installId, installId),
-				inArray(installEvents.type, ['installed', 'uninstalled'])
-			)
-		)
+		.where(and(eq(installEvents.installId, installId), inArray(installEvents.type, [...STATE_EVENTS])))
 		.orderBy(asc(installEvents.occurredAt));
 
 	if (!events.length) return;
@@ -150,13 +160,15 @@ async function rebuildInstallState(db: DrizzleClient, installId: string) {
 	const installs_ = events.filter((e) => e.type === 'installed');
 	const uninstalls = events.filter((e) => e.type === 'uninstalled');
 	const latest = events[events.length - 1];
+	const status = STATUS_FOR_EVENT[latest.type as StateEvent] ?? 'installed';
 
 	await db
 		.update(installs)
 		.set({
-			status: latest.type === 'uninstalled' ? 'uninstalled' : 'installed',
+			status,
 			installedAt: installs_.at(-1)?.occurredAt ?? latest.occurredAt,
-			uninstalledAt: latest.type === 'uninstalled' ? (uninstalls.at(-1)?.occurredAt ?? null) : null,
+			// A closed shop did not uninstall, so it keeps an empty uninstall date.
+			uninstalledAt: status === 'uninstalled' ? (uninstalls.at(-1)?.occurredAt ?? null) : null,
 			installCount: Math.max(1, installs_.length),
 			updatedAt: new Date()
 		})
@@ -260,7 +272,8 @@ export async function recordInstall(
 		}
 	}
 
-	const wasUninstalled = existing?.status === 'uninstalled';
+	// Closed counts as gone too, so a shop that re-opens gets its welcome.
+	const wasUninstalled = Boolean(existing && existing.status !== 'installed');
 
 	// The Partner sync may already have this install under a slightly different
 	// clock; recording it again would double the count.
@@ -347,7 +360,8 @@ export async function recordUninstall(
 
 	const uninstalledAt = options.uninstalledAt ?? new Date();
 	const source = options.source ?? 'ingest';
-	const alreadyUninstalled = row.install.status === 'uninstalled';
+	// A shop Shopify already closed is gone; asking it why it left is noise.
+	const alreadyUninstalled = row.install.status !== 'installed';
 
 	// The app's own exit survey beats Shopify's dropdown, whichever lands first:
 	// it is your question, and it carries free text alongside it.
@@ -422,7 +436,7 @@ export async function recordLifecycleHistory(
 		appId: string;
 		profile: MerchantProfile;
 		events: {
-			type: 'installed' | 'uninstalled';
+			type: 'installed' | 'uninstalled' | 'deactivated';
 			occurredAt: Date;
 			reason?: string | null;
 		}[];
@@ -455,7 +469,7 @@ export async function recordLifecycleHistory(
 			.values({
 				appId: options.appId,
 				merchantId: merchant.id,
-				status: last.type === 'uninstalled' ? 'uninstalled' : 'installed',
+				status: STATUS_FOR_EVENT[last.type] ?? 'installed',
 				installedAt: first.occurredAt
 			})
 			.returning();

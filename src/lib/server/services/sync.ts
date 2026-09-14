@@ -8,7 +8,7 @@ import {
 	transactions
 } from '$lib/server/db/schema';
 import { recordCommission, releaseMaturedCommissions } from './commission';
-import { normalizeShopDomain } from './referral';
+import { isInternalShop, normalizeShopDomain } from './referral';
 import { recordInstall, recordLifecycleHistory, upsertMerchant } from './merchant';
 import { findListing } from './listing';
 import { findAdoptableApp, uniqueSlug } from './app-registry';
@@ -241,6 +241,21 @@ export async function syncApps(
 	}
 }
 
+const DAY = 24 * 60 * 60 * 1000;
+
+/**
+ * How far every incremental run reaches back regardless of the watermark.
+ *
+ * Shopify publishes a transaction some days after the `createdAt` it stamps on
+ * it. A one-day overlap was not enough: AppOneTimeSale/788271547 was dated
+ * 2026-09-07 08:07, was still absent from the API when the 2026-09-09 run asked
+ * for everything since 2026-09-04, and by the time Shopify published it the
+ * watermark had moved to 2026-09-08. It was invisible from then on. The window
+ * has to be wider than Shopify's publishing lag, not wider than the gap between
+ * our runs.
+ */
+const LOOKBACK_DAYS = 14;
+
 /** Where to resume from for this account: its last successful run, else 30 days back. */
 async function windowStart(
 	db: DrizzleClient,
@@ -262,10 +277,11 @@ async function windowStart(
 		.orderBy(desc(partnerSyncRuns.startedAt))
 		.limit(1);
 
-	if (!last) return new Date(Date.now() - firstRunDays * 24 * 60 * 60 * 1000);
+	if (!last) return new Date(Date.now() - firstRunDays * DAY);
 
-	// Overlap by a day so nothing slips between runs.
-	return new Date(last.startedAt.getTime() - 24 * 60 * 60 * 1000);
+	// Whichever is earlier: one day before the last run, or the fixed lookback.
+	// After an outage the first is earlier and the whole gap is re-read.
+	return new Date(Math.min(last.startedAt.getTime() - DAY, Date.now() - LOOKBACK_DAYS * DAY));
 }
 
 async function finishRun(
@@ -296,7 +312,8 @@ export async function syncTransactions(
 	db: DrizzleClient,
 	env: Env,
 	account: Account,
-	trigger: 'cron' | 'manual' = 'cron'
+	trigger: 'cron' | 'manual' = 'cron',
+	options: { since?: Date } = {}
 ): Promise<SyncSummary> {
 	const [run] = await db
 		.insert(partnerSyncRuns)
@@ -331,7 +348,9 @@ export async function syncTransactions(
 			if (app.partnerAppId) appsByPartnerId.set(app.partnerAppId, app);
 		}
 
-		const createdAtMin = (await windowStart(db, account.id, 'transactions')).toISOString();
+		const createdAtMin = (
+			options.since ?? (await windowStart(db, account.id, 'transactions'))
+		).toISOString();
 		let hasNextPage = true;
 
 		while (hasNextPage) {
@@ -473,18 +492,33 @@ async function applyTransaction(
 	return { matched: true, commission: Boolean(commission) };
 }
 
+/** How far a first-time backfill of an app's relationship events reaches back. */
+const BACKFILL_DAYS = 730;
+
 /**
- * Pulls install, uninstall and reactivation events for one account's apps.
+ * Pulls install, uninstall, deactivation and reactivation events for one
+ * account's apps.
  *
  * Records every merchant, keeps install state current, and captures Shopify's
  * own churn reason on uninstall. Referrals that were waiting on an install get
  * marked active; attribution is never invented here.
+ *
+ * The window is per app, not per account. It used to be per account, so the
+ * two-year first-run window was spent on whichever apps happened to be linked
+ * at the time; six apps linked hours later inherited a one-day window and never
+ * saw their own history — 67 shops were missing from the install counts.
+ *
+ * A backfill is expensive enough to be rationed: `maxBackfills` apps get the
+ * full window per run and the rest stay incremental, so a fleet of new apps
+ * fills in over consecutive runs instead of blowing the Workers subrequest cap
+ * in one.
  */
 export async function syncInstalls(
 	db: DrizzleClient,
 	env: Env,
 	account: Account,
-	trigger: 'cron' | 'manual' = 'cron'
+	trigger: 'cron' | 'manual' = 'cron',
+	options: { since?: Date; maxBackfills?: number } = {}
 ): Promise<SyncSummary> {
 	const [run] = await db
 		.insert(partnerSyncRuns)
@@ -502,14 +536,31 @@ export async function syncInstalls(
 
 	try {
 		const credentials = credentialsFor(account);
-		// Two years on the first run so churn history is not a blank slate.
-		const occurredAtMin = (await windowStart(db, account.id, 'installs', 730)).toISOString();
+		const startedAt = new Date();
+		let backfillsLeft = options.since ? Infinity : (options.maxBackfills ?? 1);
 
 		const tracked = (
 			await db.select().from(apps).where(eq(apps.partnerAccountId, account.id))
 		).filter((a) => a.partnerAppId);
 
 		for (const app of tracked) {
+			// An app that has never been read in full gets the two-year window, as
+			// long as this run still has budget for one. Otherwise it stays on the
+			// incremental window and keeps its claim on the next run.
+			const backfilling = !options.since && !app.eventsSyncedAt && backfillsLeft > 0;
+			if (backfilling) backfillsLeft--;
+
+			let from: Date;
+			if (options.since) from = options.since;
+			else if (backfilling) from = new Date(Date.now() - BACKFILL_DAYS * DAY);
+			else if (!app.eventsSyncedAt) from = new Date(Date.now() - LOOKBACK_DAYS * DAY);
+			else
+				from = new Date(
+					Math.min(app.eventsSyncedAt.getTime() - DAY, Date.now() - LOOKBACK_DAYS * DAY)
+				);
+
+			const occurredAtMin = from.toISOString();
+
 			// Collect the whole window before applying it: a shop that installed,
 			// churned and came back must be replayed in order or it ends up in the
 			// wrong state.
@@ -546,14 +597,31 @@ export async function syncInstalls(
 			// enough to have the request killed mid-run.
 			const byShop = new Map<
 				string,
-				{ shopName: string | null; events: { type: 'installed' | 'uninstalled'; occurredAt: Date; reason: string | null }[] }
+				{
+					shopName: string | null;
+					events: {
+						type: 'installed' | 'uninstalled' | 'deactivated';
+						occurredAt: Date;
+						reason: string | null;
+					}[];
+				}
 			>();
 
 			for (const event of collected) {
 				const shopDomain = event.shopDomain && normalizeShopDomain(event.shopDomain);
-				if (!shopDomain) continue;
+				// Shopify redacts the domain of a long-closed shop to the literal
+				// "REDACTED", which is not a myshopify domain and normalises to null.
+				if (!shopDomain || isInternalShop(shopDomain)) continue;
 
-				const type = event.kind === 'uninstalled' ? 'uninstalled' : 'installed';
+				// A reactivation is a shop coming back, which is the same state as an
+				// install; a deactivation is Shopify closing it, which is neither an
+				// install nor a merchant-driven uninstall.
+				const type =
+					event.kind === 'uninstalled'
+						? 'uninstalled'
+						: event.kind === 'deactivated'
+							? 'deactivated'
+							: 'installed';
 				const entry = byShop.get(shopDomain) ?? { shopName: null, events: [] };
 				entry.shopName ??= event.shopName;
 				entry.events.push({ type, occurredAt: new Date(event.occurredAt), reason: event.reason });
@@ -588,6 +656,16 @@ export async function syncInstalls(
 							)
 						);
 				}
+			}
+
+			// Only claim the app is read up to here once a full window has landed.
+			// A run that ran out of backfill budget leaves the column null so the
+			// next one picks the app up.
+			if (backfilling || app.eventsSyncedAt) {
+				await db
+					.update(apps)
+					.set({ eventsSyncedAt: startedAt, updatedAt: new Date() })
+					.where(eq(apps.id, app.id));
 			}
 		}
 

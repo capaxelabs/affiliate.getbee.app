@@ -16,6 +16,8 @@
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
 
+	const today = new Date().toISOString().slice(0, 10);
+
 	let running = $state<string | null>(null);
 
 	const run = (key: string) => () => {
@@ -134,6 +136,32 @@
 											<LoaderIcon class="size-3.5 animate-spin" />
 										{/if}
 										Transactions
+									</Button>
+								</form>
+								<form
+									method="POST"
+									action="?/backfill"
+									use:enhance={run(`b-${account.id}`)}
+									class="flex items-center gap-2"
+								>
+									<input type="hidden" name="partnerAccountId" value={account.id} />
+									<input
+										type="date"
+										name="since"
+										required
+										max={today}
+										class="h-8 rounded-md border bg-background px-2 text-sm"
+									/>
+									<Button
+										type="submit"
+										size="sm"
+										variant="ghost"
+										disabled={!account.hasToken || running !== null}
+									>
+										{#if running === `b-${account.id}`}
+											<LoaderIcon class="size-3.5 animate-spin" />
+										{/if}
+										Backfill
 									</Button>
 								</form>
 							</div>

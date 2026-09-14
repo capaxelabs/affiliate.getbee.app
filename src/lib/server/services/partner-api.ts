@@ -39,9 +39,9 @@ export type PartnerApp = {
 	apiKey?: string | null;
 };
 
-/** An install, uninstall or reactivation on one app. */
+/** An install, uninstall, deactivation or reactivation on one app. */
 export type PartnerRelationshipEvent = {
-	kind: 'installed' | 'uninstalled' | 'reactivated';
+	kind: 'installed' | 'uninstalled' | 'deactivated' | 'reactivated';
 	occurredAt: string;
 	shopDomain: string | null;
 	shopName: string | null;
@@ -96,7 +96,12 @@ query AppRelationshipEvents($appId: ID!, $after: String, $occurredAtMin: DateTim
       first: 100
       after: $after
       occurredAtMin: $occurredAtMin
-      types: [RELATIONSHIP_INSTALLED, RELATIONSHIP_UNINSTALLED, RELATIONSHIP_REACTIVATED]
+      types: [
+        RELATIONSHIP_INSTALLED
+        RELATIONSHIP_UNINSTALLED
+        RELATIONSHIP_DEACTIVATED
+        RELATIONSHIP_REACTIVATED
+      ]
     ) {
       pageInfo { hasNextPage }
       edges {
@@ -106,6 +111,7 @@ query AppRelationshipEvents($appId: ID!, $after: String, $occurredAtMin: DateTim
           __typename
           ... on RelationshipInstalled { shop { myshopifyDomain name } }
           ... on RelationshipReactivated { shop { myshopifyDomain name } }
+          ... on RelationshipDeactivated { shop { myshopifyDomain name } }
           ... on RelationshipUninstalled { reason shop { myshopifyDomain name } }
         }
       }
@@ -252,10 +258,14 @@ type RelationshipEventsResponse = {
 const RELATIONSHIP_KIND: Record<string, PartnerRelationshipEvent['kind']> = {
 	RelationshipInstalled: 'installed',
 	RelationshipUninstalled: 'uninstalled',
+	// A closed or frozen shop. Shopify raises this instead of an uninstall, and
+	// unlike RelationshipUninstalled the type carries no `reason` field — asking
+	// for one is a schema error, not an empty value.
+	RelationshipDeactivated: 'deactivated',
 	RelationshipReactivated: 'reactivated'
 };
 
-/** Installs, uninstalls and reactivations for one app, in one pass. */
+/** Installs, uninstalls, deactivations and reactivations for one app, in one pass. */
 export async function fetchRelationshipEvents(
 	credentials: PartnerCredentials,
 	partnerAppId: string,

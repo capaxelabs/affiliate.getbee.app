@@ -15,6 +15,19 @@ export function normalizeShopDomain(input: string): string | null {
 	return value;
 }
 
+/**
+ * Shops that are not merchants and must never reach the install counts.
+ *
+ * `app-review-*` are the throwaway stores Shopify spins up to run App Store
+ * review; they install every app under review and vanish. `redacted` is what an
+ * app posts once Shopify has redacted the shop under the GDPR shop/redact
+ * webhook — one row that every app writes to, so it is not a shop at all.
+ * Neither appears in the Partner dashboard's install count.
+ */
+export function isInternalShop(shopDomain: string): boolean {
+	return /^(app-review-|redacted\.)/.test(shopDomain);
+}
+
 export type AttributionSource = 'click' | 'claim' | 'manual' | 'partner_api';
 
 export type AttributeInput = {

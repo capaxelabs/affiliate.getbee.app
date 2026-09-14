@@ -63,3 +63,10 @@ export function humanize(value: string | null | undefined) {
 export function plural(count: number, one: string, many = `${one}s`) {
 	return `${count} ${count === 1 ? one : many}`;
 }
+
+/** How an install row's status reads in the admin. */
+export const INSTALL_STATUS_LABEL: Record<string, string> = {
+	installed: 'Installed',
+	uninstalled: 'Uninstalled',
+	closed: 'Store closed'
+};

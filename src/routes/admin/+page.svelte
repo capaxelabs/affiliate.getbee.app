@@ -108,7 +108,11 @@
 	<Card.Root class="gap-0 p-0">
 		<Card.Header class="border-b px-5 py-4">
 			<Card.Title class="text-base">Revenue by app</Card.Title>
-			<Card.Description>Every app in the program, referred installs and otherwise.</Card.Description>
+			<Card.Description>
+				Every app in the program, referred installs and otherwise. Installs counts live
+				shops only, so it lines up with the Partner dashboard; closed shops sit in their
+				own column.
+			</Card.Description>
 			<Card.Action>
 				<Button href="/admin/apps" variant="ghost" size="sm">Manage apps</Button>
 			</Card.Action>
@@ -126,6 +130,7 @@
 								<Table.Head>App</Table.Head>
 								<Table.Head class="text-right">Installs</Table.Head>
 								<Table.Head class="text-right">Churned</Table.Head>
+								<Table.Head class="text-right">Closed</Table.Head>
 								<Table.Head class="text-right">This month</Table.Head>
 								<Table.Head class="text-right">Net</Table.Head>
 								<Table.Head class="text-right">Gross</Table.Head>
@@ -160,6 +165,9 @@
 									<Table.Cell class="text-right tabular-nums text-muted-foreground">
 										{app.churnedInstalls}
 									</Table.Cell>
+									<Table.Cell class="text-right tabular-nums text-muted-foreground">
+										{app.closedInstalls}
+									</Table.Cell>
 									<Table.Cell class="text-right tabular-nums">
 										{money(app.thisMonthGrossCents)}
 									</Table.Cell>
@@ -182,6 +190,7 @@
 								<Table.Cell class="font-medium">Total</Table.Cell>
 								<Table.Cell class="text-right tabular-nums">{m.activeInstalls}</Table.Cell>
 								<Table.Cell class="text-right tabular-nums">{m.churnedInstalls}</Table.Cell>
+								<Table.Cell class="text-right tabular-nums">{m.closedInstalls}</Table.Cell>
 								<Table.Cell class="text-right tabular-nums">
 									{money(r.thisMonthGrossCents)}
 								</Table.Cell>
