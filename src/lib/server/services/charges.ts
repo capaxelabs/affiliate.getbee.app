@@ -74,14 +74,19 @@ export async function applyChargeEvents(
 
 	if (!byCharge.size) return { seen: 0, written: 0 };
 
-	const existing = new Map(
-		(
-			await db
-				.select()
-				.from(appCharges)
-				.where(inArray(appCharges.partnerChargeId, [...byCharge.keys()]))
-		).map((row) => [row.partnerChargeId, row])
-	);
+	// D1 caps bound parameters at 100 per query, and every id in an IN list binds
+	// one. A two-year backfill of a busy app can easily pass that, so the lookup
+	// is chunked rather than sent as one statement.
+	const ids = [...byCharge.keys()];
+	const existing = new Map<string, typeof appCharges.$inferSelect>();
+
+	for (let i = 0; i < ids.length; i += 90) {
+		const rows = await db
+			.select()
+			.from(appCharges)
+			.where(inArray(appCharges.partnerChargeId, ids.slice(i, i + 90)));
+		for (const row of rows) existing.set(row.partnerChargeId, row);
+	}
 
 	let written = 0;
 
