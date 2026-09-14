@@ -280,6 +280,38 @@ export const installEvents = sqliteTable(
 	]
 );
 
+/* -------------------------------------------------------- internal shops */
+
+/**
+ * Shops that must never become merchants: Shopify's App Store review stores,
+ * and the redact placeholder.
+ *
+ * A list rather than a pattern because the Partner API cannot be asked. It
+ * reports a shop as a domain and a name and never an email, so the only place a
+ * reviewer identifies itself is the `@shopify.com` address on the install
+ * webhook the app sends. Remember the domain there and every later source —
+ * including a two-year Partner backfill that would otherwise resurrect it —
+ * recognises it too.
+ *
+ * Shopify re-reviews on every submission, so this grows by itself.
+ */
+export const internalShops = sqliteTable(
+	'internal_shops',
+	{
+		id: text('id')
+			.primaryKey()
+			.$defaultFn(() => newId('int')),
+		shopDomain: text('shop_domain').notNull(),
+		reason: text('reason', { enum: ['app_review', 'redacted', 'manual'] })
+			.notNull()
+			.default('app_review'),
+		/** What gave it away, so a surprising entry can be argued with later. */
+		note: text('note'),
+		createdAt: integer('created_at', { mode: 'timestamp' }).notNull().default(now)
+	},
+	(t) => [uniqueIndex('internal_shops_domain_idx').on(t.shopDomain)]
+);
+
 /* --------------------------------------------------------------- charges */
 
 /**
@@ -849,6 +881,7 @@ export type Merchant = typeof merchants.$inferSelect;
 export type Install = typeof installs.$inferSelect;
 export type InstallEvent = typeof installEvents.$inferSelect;
 export type AppCharge = typeof appCharges.$inferSelect;
+export type InternalShop = typeof internalShops.$inferSelect;
 export type Transaction = typeof transactions.$inferSelect;
 export type LifecycleEmail = typeof lifecycleEmails.$inferSelect;
 export type PartnerAccount = typeof partnerAccounts.$inferSelect;

@@ -8,7 +8,8 @@ import {
 	transactions
 } from '$lib/server/db/schema';
 import { recordCommission, releaseMaturedCommissions } from './commission';
-import { isInternalShop, normalizeShopDomain } from './referral';
+import { normalizeShopDomain } from './referral';
+import { isInternalDomain, loadInternalShops } from './internal-shops';
 import { recordInstall, recordLifecycleHistory, upsertMerchant } from './merchant';
 import { findListing } from './listing';
 import { findAdoptableApp, uniqueSlug } from './app-registry';
@@ -38,6 +39,8 @@ export type SyncSummary = {
 	recordsSeen: number;
 	recordsMatched: number;
 	commissionsCreated: number;
+	/** Apps still waiting for a first full read. Non-zero means run it again. */
+	pendingBackfills?: number;
 	error?: string;
 };
 
@@ -535,30 +538,43 @@ export async function syncInstalls(
 
 	let seen = 0;
 	let matched = 0;
+	let pendingBackfills = 0;
 
 	try {
 		const credentials = credentialsFor(account);
 		const startedAt = new Date();
-		let backfillsLeft = options.since ? Infinity : (options.maxBackfills ?? 1);
+		let backfillsLeft = options.maxBackfills ?? 1;
+
+		// Loaded once for the whole run. Per shop it would be a D1 call each, and
+		// on Workers every one is a subrequest against a hard per-request cap.
+		const knownInternal = await loadInternalShops(db);
 
 		const tracked = (
 			await db.select().from(apps).where(eq(apps.partnerAccountId, account.id))
 		).filter((a) => a.partnerAppId);
 
 		for (const app of tracked) {
-			// An app that has never been read in full gets the two-year window, as
-			// long as this run still has budget for one. Otherwise it stays on the
-			// incremental window and keeps its claim on the next run.
-			const backfilling = !options.since && !app.eventsSyncedAt && backfillsLeft > 0;
+			// An app that has never been read in full gets the deep window, as long
+			// as this run still has budget for one. Everything else stays
+			// incremental and keeps its claim on the next run.
+			//
+			// The budget is the whole point: reading two years for eight apps in
+			// one request is thousands of D1 calls, and on Workers every one is a
+			// subrequest against a hard per-request cap. Doing it unbounded got the
+			// request killed three apps in, with the run row stranded on 'running'.
+			const needsBackfill = !app.eventsSyncedAt;
+			const backfilling = needsBackfill && backfillsLeft > 0;
 			if (backfilling) backfillsLeft--;
+			else if (needsBackfill) pendingBackfills++;
 
 			let from: Date;
-			if (options.since) from = options.since;
-			else if (backfilling) from = new Date(Date.now() - BACKFILL_DAYS * DAY);
-			else if (!app.eventsSyncedAt) from = new Date(Date.now() - LOOKBACK_DAYS * DAY);
+			// `since` only deepens a backfill; it never turns an incremental run
+			// into an unbounded one.
+			if (backfilling) from = options.since ?? new Date(Date.now() - BACKFILL_DAYS * DAY);
+			else if (needsBackfill) from = new Date(Date.now() - LOOKBACK_DAYS * DAY);
 			else
 				from = new Date(
-					Math.min(app.eventsSyncedAt.getTime() - DAY, Date.now() - LOOKBACK_DAYS * DAY)
+					Math.min(app.eventsSyncedAt!.getTime() - DAY, Date.now() - LOOKBACK_DAYS * DAY)
 				);
 
 			const occurredAtMin = from.toISOString();
@@ -615,7 +631,9 @@ export async function syncInstalls(
 				const shopDomain = event.shopDomain && normalizeShopDomain(event.shopDomain);
 				// Shopify redacts the domain of a long-closed shop to the literal
 				// "REDACTED", which is not a myshopify domain and normalises to null.
-				if (!shopDomain || isInternalShop(shopDomain)) continue;
+				if (!shopDomain || isInternalDomain(shopDomain) || knownInternal.has(shopDomain)) {
+					continue;
+				}
 
 				// A reactivation is a shop coming back, which is the same state as an
 				// install; a deactivation is Shopify closing it, which is neither an
@@ -642,7 +660,8 @@ export async function syncInstalls(
 					appId: app.id,
 					profile: { shopDomain, name: entry.shopName },
 					events: entry.events,
-					source: 'partner_api'
+					source: 'partner_api',
+					knownInternal
 				});
 				if (!result) continue;
 				merchantByShop.set(shopDomain, result.merchantId);
@@ -674,6 +693,7 @@ export async function syncInstalls(
 			const charges = await applyChargeEvents(db, {
 				appId: app.id,
 				events: chargeEvents,
+				knownInternal,
 				merchantIdFor: (shop) => merchantByShop.get(shop)
 			});
 			matched += charges.written;
@@ -681,7 +701,7 @@ export async function syncInstalls(
 			// Only claim the app is read up to here once a full window has landed.
 			// A run that ran out of backfill budget leaves the column null so the
 			// next one picks the app up.
-			if (backfilling || app.eventsSyncedAt) {
+			if (backfilling || !needsBackfill) {
 				await db
 					.update(apps)
 					.set({ eventsSyncedAt: startedAt, updatedAt: new Date() })
@@ -700,7 +720,8 @@ export async function syncInstalls(
 			status: 'success',
 			recordsSeen: seen,
 			recordsMatched: matched,
-			commissionsCreated: 0
+			commissionsCreated: 0,
+			pendingBackfills
 		};
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);

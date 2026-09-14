@@ -2,7 +2,8 @@ import { eq, inArray } from 'drizzle-orm';
 import type { DrizzleClient } from '$lib/server/db';
 import { appCharges } from '$lib/server/db/schema';
 import { toCents, type PartnerChargeEvent } from './partner-api';
-import { isInternalShop, normalizeShopDomain } from './referral';
+import { normalizeShopDomain } from './referral';
+import { isInternalDomain } from './internal-shops';
 
 type ChargeStatus = typeof appCharges.$inferSelect['status'];
 
@@ -54,6 +55,7 @@ export async function applyChargeEvents(
 	options: {
 		appId: string;
 		events: PartnerChargeEvent[];
+		knownInternal?: Set<string>;
 		merchantIdFor?: (shopDomain: string) => string | null | undefined;
 	}
 ): Promise<ChargeSyncResult> {
@@ -62,7 +64,8 @@ export async function applyChargeEvents(
 	for (const event of options.events) {
 		if (event.test) continue;
 		const shopDomain = event.shopDomain && normalizeShopDomain(event.shopDomain);
-		if (!shopDomain || isInternalShop(shopDomain)) continue;
+		if (!shopDomain || isInternalDomain(shopDomain)) continue;
+		if (options.knownInternal?.has(shopDomain)) continue;
 
 		const list = byCharge.get(event.chargeId) ?? [];
 		list.push({ ...event, shopDomain });

@@ -1,7 +1,8 @@
 import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import type { DrizzleClient } from '$lib/server/db';
 import { apps, installEvents, installs, merchants } from '$lib/server/db/schema';
-import { isInternalShop, normalizeShopDomain } from './referral';
+import { normalizeShopDomain } from './referral';
+import { isInternalShop } from './internal-shops';
 import { queueLifecycleEmail } from './lifecycle';
 
 export type MerchantProfile = {
@@ -22,9 +23,26 @@ export type MerchantProfile = {
  * when the caller actually supplied one, so a sparse Partner API record can't
  * blank out richer details the app sent at install time.
  */
-export async function upsertMerchant(db: DrizzleClient, profile: MerchantProfile, seenAt = new Date()) {
+export async function upsertMerchant(
+	db: DrizzleClient,
+	profile: MerchantProfile,
+	seenAt = new Date(),
+	options: { knownInternal?: Set<string> } = {}
+) {
 	const shopDomain = normalizeShopDomain(profile.shopDomain);
-	if (!shopDomain || isInternalShop(shopDomain)) return null;
+	if (!shopDomain) return null;
+
+	// Shopify's reviewers install every app under review and are gone by the
+	// time anyone looks. They are not merchants and the Partner dashboard has
+	// never counted them.
+	if (
+		await isInternalShop(db, shopDomain, {
+			email: profile.email,
+			known: options.knownInternal
+		})
+	) {
+		return null;
+	}
 
 	const [existing] = await db
 		.select()
@@ -334,6 +352,9 @@ export async function recordUninstall(
 ) {
 	const shopDomain = normalizeShopDomain(options.shopDomain);
 	if (!shopDomain) return null;
+	// The uninstall payload carries no email, so this can only recognise a shop
+	// already on the list — which is enough, since the install came first.
+	if (await isInternalShop(db, shopDomain)) return null;
 
 	const find = () =>
 		db
@@ -441,6 +462,8 @@ export async function recordLifecycleHistory(
 			reason?: string | null;
 		}[];
 		source?: 'ingest' | 'partner_api' | 'manual';
+		/** Preloaded internal-shop list, so the bulk path costs no extra query. */
+		knownInternal?: Set<string>;
 	}
 ): Promise<{ merchantId: string; installId: string; inserted: number } | null> {
 	if (!options.events.length) return null;
@@ -451,7 +474,9 @@ export async function recordLifecycleHistory(
 	const first = ordered[0];
 	const last = ordered[ordered.length - 1];
 
-	const merchant = await upsertMerchant(db, options.profile, last.occurredAt);
+	const merchant = await upsertMerchant(db, options.profile, last.occurredAt, {
+		knownInternal: options.knownInternal
+	});
 	if (!merchant) return null;
 
 	const [existing] = await db

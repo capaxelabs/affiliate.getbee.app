@@ -117,20 +117,29 @@ export const actions: Actions = {
 			.limit(1);
 		if (!account) return fail(400, { error: 'Pick a partner account.' });
 
+		// Two apps per request. Reading years of history for every app at once is
+		// thousands of D1 calls, and on Workers each is a subrequest against a
+		// hard per-request cap — doing it unbounded got the request killed three
+		// apps in. Whatever is left is reported so the button can be clicked again.
 		const installs = await syncInstalls(event.locals.db, event.platform!.env, account, 'manual', {
-			since: from
+			since: from,
+			maxBackfills: 2
 		});
 		const txns = await syncTransactions(event.locals.db, event.platform!.env, account, 'manual', {
 			since: from
 		});
 
 		const failed = [installs, txns].filter((r) => r.status === 'failed');
+		const remaining = installs.pendingBackfills ?? 0;
 
 		return {
 			success: failed.length === 0,
 			message: failed.length
 				? (failed[0].error ?? 'Backfill failed.')
-				: `${account.name}: ${installs.recordsSeen} events, ${txns.recordsSeen} transactions, ${txns.commissionsCreated} commissions since ${since}.`
+				: `${account.name}: ${installs.recordsSeen} events, ${txns.recordsSeen} transactions, ${txns.commissionsCreated} commissions since ${since}.` +
+					(remaining
+						? ` ${remaining} app(s) still to backfill — run it again.`
+						: ' Every app is backfilled.')
 		};
 	},
 

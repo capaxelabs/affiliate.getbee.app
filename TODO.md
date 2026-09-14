@@ -192,10 +192,21 @@ Three roles, one login (email magic-code):
       watermark permanently.
 - [x] Ignore `app-review-*.myshopify.com` and `redacted.myshopify.com` at
       `upsertMerchant`, so neither ingest nor sync can create them.
-- [ ] Delete the 15 existing internal merchant rows (19 installs, 51 events).
-      Nothing references them: 0 transactions, 0 referrals, 0 lifecycle emails.
-- [ ] Backfill production once the fix is deployed, then re-check the eight
-      install counts against the Partner dashboard.
+- [x] `internal_shops` remembers every shop that must never become a merchant.
+      A pattern alone cannot work: the Partner API reports a shop as a domain
+      and a name and never an email, so a reviewer using an ordinary-looking
+      domain (`zddnse-by`, `dphutk-fs`, `uvszh1-m5`, `g8db1y-pk`, `5zfdxw-r8`,
+      `92yeg1-ts`) is only identifiable from the `@shopify.com` address on the
+      app's own install webhook. Remembering the domain there means the nightly
+      Partner sync recognises it too. Shopify re-reviews on every submission,
+      so the list grows by itself.
+- [x] Manual backfill is bounded at two apps per request and reports what is
+      left. Running all eight at the full window in one request got the Worker
+      killed three apps in, stranding the run row on `running`.
+- [ ] Backfill the six remaining apps: Bee AI SEO, Bee Reviews, Bee
+      Subscriptions, Bee Gifting, Bee Migration, Bee GST Invoice. RankFlo and
+      Shootflo Studio are verified complete against the Partner API (0 missing
+      shops, 0 mismatched) and already marked.
 - [ ] App names never refresh for apps with no transactions, so the admin still
       shows "Bee GST Invoice", "Bee Gifting", "Bee Migration" where Shopify has
       "Bee Invoices", "Bee secret gift", "Bee Migrate".
@@ -221,6 +232,16 @@ Three roles, one login (email magic-code):
 - [ ] First sync after deploy should record committed MRR of $209: Shootflo
       $200 (t4m9kj-bx, Elite Plan, bills 2026-10-12) and RankFlo $9 (di4820-s0,
       Starter). Verify against the dashboard.
+
+## Abuse signals
+
+- [ ] Three Shootflo shops share the disposable-mail domain `emailinbo.live`
+      with 10-hex-character random local parts, all named "My Store", all
+      Germany, all Regular plan, installed 2026-08-08 / 08-10 / 08-17, all still
+      installed with zero transactions: `tfs0m1-rp`, `1ptb0y-xt`, `0qpkh0-by`.
+      A fourth, `g122ss-j1`, uses `difav40942@afterdo.com`. Shootflo sells
+      credit packs, so fresh stores on the free tier are worth something.
+      `internal_shops` is the mechanism if these should stop counting.
 
 ## Next
 
