@@ -16,9 +16,35 @@
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
 
-	const today = new Date().toISOString().slice(0, 10);
-
 	let running = $state<string | null>(null);
+	const backfillForms: Record<string, HTMLFormElement> = {};
+
+	/**
+	 * One request backfills two apps — the Workers subrequest cap kills anything
+	 * greedier — so the form resubmits itself until the server reports nothing
+	 * left. One click walks the whole account.
+	 */
+	const runBackfill = (key: string) => () => {
+		running = key;
+		return async ({ result, update }: any) => {
+			running = null;
+			if (result.type === 'success' && result.data?.success) {
+				toast.success(result.data.message);
+				await update();
+				if (result.data.remaining > 0) {
+					setTimeout(() => backfillForms[key]?.requestSubmit(), 300);
+				}
+			} else if (result.type === 'success') {
+				toast.error(result.data?.message ?? 'Backfill failed.');
+				await update();
+			} else if (result.type === 'failure') {
+				toast.error(result.data?.error ?? 'Backfill failed.');
+				await update();
+			} else {
+				await update();
+			}
+		};
+	};
 
 	const run = (key: string) => () => {
 		running = key;
@@ -141,27 +167,21 @@
 								<form
 									method="POST"
 									action="?/backfill"
-									use:enhance={run(`b-${account.id}`)}
-									class="flex items-center gap-2"
+									use:enhance={runBackfill(`b-${account.id}`)}
+									bind:this={backfillForms[`b-${account.id}`]}
 								>
 									<input type="hidden" name="partnerAccountId" value={account.id} />
-									<input
-										type="date"
-										name="since"
-										required
-										max={today}
-										class="h-8 rounded-md border bg-background px-2 text-sm"
-									/>
 									<Button
 										type="submit"
 										size="sm"
 										variant="ghost"
 										disabled={!account.hasToken || running !== null}
+										title="Re-reads every app's full install and charge history, two apps per request, until all are done"
 									>
 										{#if running === `b-${account.id}`}
 											<LoaderIcon class="size-3.5 animate-spin" />
 										{/if}
-										Backfill
+										Backfill all
 									</Button>
 								</form>
 							</div>

@@ -185,7 +185,11 @@ Three roles, one login (email magic-code):
       first-run window was per account, so the six apps linked after 2026-09-05
       02:55 inherited a 24-hour window and never saw their history. One backfill
       per run keeps the Workers subrequest cap out of it.
-- [x] Backfill-from-date action on Admin → Sync, per partner account.
+- [x] "Backfill all" on Admin → Sync: one click re-reads every app's full
+      install and charge history. Two apps per request under the Workers
+      subrequest cap; the form resubmits itself until the server reports
+      nothing left. (Replaced the date field — a locale-dependent date input
+      silently refused to submit.)
 - [x] Transaction watermark widened to a 14-day floor. Shopify publishes a
       transaction days after the `createdAt` it stamps on it, so a one-day overlap
       let AppOneTimeSale/788271547 (2026-09-07, $24.27 net) fall behind the
@@ -203,10 +207,10 @@ Three roles, one login (email magic-code):
 - [x] Manual backfill is bounded at two apps per request and reports what is
       left. Running all eight at the full window in one request got the Worker
       killed three apps in, stranding the run row on `running`.
-- [ ] Backfill the six remaining apps: Bee AI SEO, Bee Reviews, Bee
-      Subscriptions, Bee Gifting, Bee Migration, Bee GST Invoice. RankFlo and
-      Shootflo Studio are verified complete against the Partner API (0 missing
-      shops, 0 mismatched) and already marked.
+- [ ] Click "Backfill all" once for Bee Apps: six apps pending (RankFlo and
+      Shootflo re-queued so the charges lane sees their history — the first
+      backfill ran code that read only relationship events). Then verify the
+      eight install counts and MRR $209 against the Partner dashboard.
 - [ ] App names never refresh for apps with no transactions, so the admin still
       shows "Bee GST Invoice", "Bee Gifting", "Bee Migration" where Shopify has
       "Bee Invoices", "Bee secret gift", "Bee Migrate".

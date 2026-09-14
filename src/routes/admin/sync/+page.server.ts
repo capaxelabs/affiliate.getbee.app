@@ -99,16 +99,7 @@ export const actions: Actions = {
 		await requireOwner(event);
 		const form = await event.request.formData();
 		const id = String(form.get('partnerAccountId') ?? '');
-		const since = String(form.get('since') ?? '');
-
 		if (!id) return fail(400, { error: 'Pick a partner account.' });
-		const from = new Date(`${since}T00:00:00Z`);
-		if (!since || Number.isNaN(from.getTime())) {
-			return fail(400, { error: 'Pick a date to backfill from.' });
-		}
-		if (from.getTime() > Date.now()) {
-			return fail(400, { error: 'That date is in the future.' });
-		}
 
 		const [account] = await event.locals.db
 			.select()
@@ -117,29 +108,24 @@ export const actions: Actions = {
 			.limit(1);
 		if (!account) return fail(400, { error: 'Pick a partner account.' });
 
-		// Two apps per request. Reading years of history for every app at once is
-		// thousands of D1 calls, and on Workers each is a subrequest against a
-		// hard per-request cap — doing it unbounded got the request killed three
-		// apps in. Whatever is left is reported so the button can be clicked again.
+		// Two apps per request, full history each. Reading every app at once is
+		// thousands of D1 calls, and a Worker request dies at the subrequest cap —
+		// so the page resubmits until `remaining` reaches zero instead.
 		const installs = await syncInstalls(event.locals.db, event.platform!.env, account, 'manual', {
-			since: from,
 			maxBackfills: 2
 		});
-		const txns = await syncTransactions(event.locals.db, event.platform!.env, account, 'manual', {
-			since: from
-		});
+		const txns = await syncTransactions(event.locals.db, event.platform!.env, account, 'manual');
 
 		const failed = [installs, txns].filter((r) => r.status === 'failed');
 		const remaining = installs.pendingBackfills ?? 0;
 
 		return {
 			success: failed.length === 0,
+			remaining,
 			message: failed.length
 				? (failed[0].error ?? 'Backfill failed.')
-				: `${account.name}: ${installs.recordsSeen} events, ${txns.recordsSeen} transactions, ${txns.commissionsCreated} commissions since ${since}.` +
-					(remaining
-						? ` ${remaining} app(s) still to backfill — run it again.`
-						: ' Every app is backfilled.')
+				: `${account.name}: ${installs.recordsSeen} events, ${txns.recordsSeen} transactions.` +
+					(remaining ? ` ${remaining} app(s) left — continuing…` : ' Every app is backfilled.')
 		};
 	},
 
