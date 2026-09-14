@@ -16,6 +16,7 @@
 	import InboxIcon from '@lucide/svelte/icons/inbox';
 	import HandCoinsIcon from '@lucide/svelte/icons/hand-coins';
 	import PackageIcon from '@lucide/svelte/icons/package';
+	import RepeatIcon from '@lucide/svelte/icons/repeat';
 	import { money, relativeTime } from '$lib/format';
 	import { REFERRAL_STATUS_LABEL, SOURCE_LABEL } from '$lib/constants';
 	import type { PageData } from './$types';
@@ -38,6 +39,9 @@
 			: `${momChange >= 0 ? '+' : ''}${momChange.toFixed(0)}% vs last month`
 	);
 
+	const mrrCents = $derived(data.perApp.reduce((a, x) => a + x.mrrCents, 0));
+	const paidSubs = $derived(data.perApp.reduce((a, x) => a + x.activeSubscriptions, 0));
+
 	const grossSeries = $derived(data.series.map((p) => ({ period: p.period, value: p.gross })));
 	const netSeries = $derived(data.series.map((p) => ({ period: p.period, value: p.net })));
 </script>
@@ -47,7 +51,11 @@
 <PageHeader title="Overview" description="Revenue, merchants and anything waiting on you." />
 
 <div class="space-y-5 px-5 pb-10 sm:px-8">
-	<div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+	<div
+		class="grid gap-4 sm:grid-cols-2 {data.access.canViewAffiliates
+			? 'xl:grid-cols-5'
+			: 'xl:grid-cols-4'}"
+	>
 		<StatCard
 			label="Gross revenue"
 			value={money(r.grossCents)}
@@ -65,6 +73,12 @@
 			value={money(r.thisMonthGrossCents)}
 			hint={momLabel}
 			icon={TrendingUpIcon}
+		/>
+		<StatCard
+			label="MRR"
+			value={money(mrrCents)}
+			hint="{paidSubs} paid {paidSubs === 1 ? 'subscription' : 'subscriptions'}, bills at cycle end"
+			icon={RepeatIcon}
 		/>
 		{#if data.access.canViewAffiliates}
 			<StatCard

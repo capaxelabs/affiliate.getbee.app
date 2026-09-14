@@ -225,7 +225,8 @@ Three roles, one login (email magic-code):
 - [x] Test charges are dropped at sync rather than stored. 281 of the 330 charge
       events across the eight apps are a developer clicking through plans on a
       dev store.
-- [x] MRR column on the dashboard, Charges card on app detail. Free tiers are
+- [x] MRR stat card on the overview top row, MRR column in the per-app table,
+      Charges card on app detail. Free tiers are
       recurring charges too, so the subscription count only includes paid ones,
       and a `billingOn` only renders while it is still in the future — Shopify
       stamps it at activation and never refreshes it.
