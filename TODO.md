@@ -202,13 +202,25 @@ Three roles, one login (email magic-code):
 
 ## Committed vs collected revenue
 
-- [ ] `transactions` only carries money Shopify has actually billed. An app
-      subscription bills at the end of its 30-day cycle, so the $200/month Elite
-      Plan activated 2026-09-12 on t4m9kj-bx has `billingOn: 2026-10-12` and no
-      transaction until then — which is why Shopify's own Earnings column says
-      $48.54 too. Read `app.events` SUBSCRIPTION_CHARGE_ACTIVATED / CANCELED /
-      FROZEN / EXPIRED / DECLINED and ONE_TIME_CHARGE_* to show committed MRR
-      beside collected revenue.
+- [x] `app_charges` — one row per Shopify charge id, status folded forward from
+      the Partner event trail. `transactions` only carries money Shopify has
+      billed, and a subscription bills at the *end* of its 30-day cycle: the
+      $200/month Elite Plan approved on 2026-09-12 has `billingOn` 2026-10-12
+      and no transaction until then, which is why Shopify's own Earnings column
+      reads $48.54 too.
+- [x] Charge events ride the existing `app.events` query rather than a second
+      request — same connection, one round trip, which matters against the
+      Workers subrequest cap.
+- [x] Test charges are dropped at sync rather than stored. 281 of the 330 charge
+      events across the eight apps are a developer clicking through plans on a
+      dev store.
+- [x] MRR column on the dashboard, Charges card on app detail. Free tiers are
+      recurring charges too, so the subscription count only includes paid ones,
+      and a `billingOn` only renders while it is still in the future — Shopify
+      stamps it at activation and never refreshes it.
+- [ ] First sync after deploy should record committed MRR of $209: Shootflo
+      $200 (t4m9kj-bx, Elite Plan, bills 2026-10-12) and RankFlo $9 (di4820-s0,
+      Starter). Verify against the dashboard.
 
 ## Next
 

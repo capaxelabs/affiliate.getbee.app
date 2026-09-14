@@ -20,6 +20,10 @@
 
 	let { data }: { data: PageData } = $props();
 
+	// billingOn is stamped when the charge activates and never moves, so once the
+	// date passes it says nothing about the next bill.
+	const upcoming = (value: Date | null) => Boolean(value && value.getTime() > Date.now());
+
 	const app = $derived(data.app);
 	const s = $derived(data.stats);
 
@@ -171,6 +175,71 @@
 		<ReportCard title="Installs" total={String(installsTotal)} points={installPoints} />
 		<ReportCard title="Uninstalls" total={String(churnTotal)} points={churnPoints} />
 	</div>
+
+	{#if data.charges.length}
+		<Card.Root class="gap-0 overflow-hidden p-0">
+			<Card.Header class="border-b px-5 py-4">
+				<Card.Title class="text-base">Charges</Card.Title>
+				<Card.Description>
+					Committed revenue. Shopify bills a subscription at the end of each 30-day cycle,
+					so a live plan shows no gross revenue until its first billing date. A date only
+					appears while it is still ahead — Shopify stamps it at activation and never
+					refreshes it, so a past one has already been billed.
+				</Card.Description>
+				{#if s.mrrCents}
+					<Card.Action>
+						<span class="text-sm font-medium tabular-nums">{money(s.mrrCents)}/mo</span>
+					</Card.Action>
+				{/if}
+			</Card.Header>
+			<Card.Content class="p-0">
+				<div class="overflow-x-auto">
+					<Table.Root>
+						<Table.Header>
+							<Table.Row>
+								<Table.Head>Shop</Table.Head>
+								<Table.Head>Plan</Table.Head>
+								<Table.Head class="text-right">Amount</Table.Head>
+								<Table.Head>Status</Table.Head>
+								<Table.Head class="text-right">Bills on</Table.Head>
+							</Table.Row>
+						</Table.Header>
+						<Table.Body>
+							{#each data.charges as charge (charge.id)}
+								<Table.Row>
+									<Table.Cell class="font-medium">{charge.shopDomain}</Table.Cell>
+									<Table.Cell class="text-muted-foreground">
+										{charge.name ?? '—'}
+										{#if charge.kind === 'one_time'}
+											<span class="ml-1 text-xs">(one-time)</span>
+										{/if}
+									</Table.Cell>
+									<Table.Cell class="text-right tabular-nums">
+										{money(charge.amountCents, charge.currency)}
+									</Table.Cell>
+									<Table.Cell>
+										<StatusBadge
+											status={charge.status === 'active'
+												? 'active'
+												: charge.status === 'pending' || charge.status === 'frozen'
+													? 'pending'
+													: 'churned'}
+											label={humanize(charge.status)}
+										/>
+									</Table.Cell>
+									<Table.Cell class="text-right text-muted-foreground tabular-nums">
+										{charge.status === 'active' && upcoming(charge.billingOn)
+											? shortDate(charge.billingOn)
+											: '—'}
+									</Table.Cell>
+								</Table.Row>
+							{/each}
+						</Table.Body>
+					</Table.Root>
+				</div>
+			</Card.Content>
+		</Card.Root>
+	{/if}
 
 	<Card.Root class="gap-0 overflow-hidden p-0">
 		<Card.Header class="border-b px-5 py-4">

@@ -16,14 +16,16 @@ import {
 	chargeTypeFor,
 	discoverApps,
 	fetchApp,
-	fetchRelationshipEvents,
+	fetchAppEvents,
 	fetchTransactions,
 	toCents,
 	type PartnerApp,
 	type PartnerCredentials,
+	type PartnerChargeEvent,
 	type PartnerRelationshipEvent,
 	type PartnerTransaction
 } from './partner-api';
+import { applyChargeEvents } from './charges';
 
 type Env = App.Platform['env'];
 type Account = typeof partnerAccounts.$inferSelect;
@@ -565,21 +567,23 @@ export async function syncInstalls(
 			// churned and came back must be replayed in order or it ends up in the
 			// wrong state.
 			const collected: PartnerRelationshipEvent[] = [];
+			const chargeEvents: PartnerChargeEvent[] = [];
 			let cursor: string | null = null;
 			let hasNextPage = true;
 
 			while (hasNextPage) {
-				const page = await fetchRelationshipEvents(credentials, app.partnerAppId!, {
+				const page = await fetchAppEvents(credentials, app.partnerAppId!, {
 					after: cursor,
 					occurredAtMin
 				});
 				hasNextPage = page.hasNextPage;
 				cursor = page.cursor;
-				collected.push(...page.events);
+				collected.push(...page.relationships);
+				chargeEvents.push(...page.charges);
 				if (!page.cursor) break;
 			}
 
-			seen += collected.length;
+			seen += collected.length + chargeEvents.length;
 
 			// One lookup up front beats a conditional update per shop.
 			const pendingReferralShops = new Set(
@@ -628,6 +632,11 @@ export async function syncInstalls(
 				byShop.set(shopDomain, entry);
 			}
 
+			// Charges are keyed by shop domain, and the loop below already creates
+			// the merchant rows they point at — so collect the ids rather than
+			// looking each one up again afterwards.
+			const merchantByShop = new Map<string, string>();
+
 			for (const [shopDomain, entry] of byShop) {
 				const result = await recordLifecycleHistory(db, {
 					appId: app.id,
@@ -636,6 +645,7 @@ export async function syncInstalls(
 					source: 'partner_api'
 				});
 				if (!result) continue;
+				merchantByShop.set(shopDomain, result.merchantId);
 				matched += entry.events.length;
 
 				// Only shops with a pending referral need the extra write.
@@ -657,6 +667,16 @@ export async function syncInstalls(
 						);
 				}
 			}
+
+			// Committed revenue. A subscription bills at the end of its 30-day
+			// cycle, so a plan approved today has no transaction for a month —
+			// invisible to `transactions` and to Shopify's own earnings figure.
+			const charges = await applyChargeEvents(db, {
+				appId: app.id,
+				events: chargeEvents,
+				merchantIdFor: (shop) => merchantByShop.get(shop)
+			});
+			matched += charges.written;
 
 			// Only claim the app is read up to here once a full window has landed.
 			// A run that ran out of backfill budget leaves the column null so the

@@ -111,7 +111,8 @@
 			<Card.Description>
 				Every app in the program, referred installs and otherwise. Installs counts live
 				shops only, so it lines up with the Partner dashboard; closed shops sit in their
-				own column.
+				own column. MRR is committed — live subscriptions Shopify bills at the end of
+				each cycle, so it has not reached Gross yet.
 			</Card.Description>
 			<Card.Action>
 				<Button href="/admin/apps" variant="ghost" size="sm">Manage apps</Button>
@@ -131,6 +132,7 @@
 								<Table.Head class="text-right">Installs</Table.Head>
 								<Table.Head class="text-right">Churned</Table.Head>
 								<Table.Head class="text-right">Closed</Table.Head>
+								<Table.Head class="text-right">MRR</Table.Head>
 								<Table.Head class="text-right">This month</Table.Head>
 								<Table.Head class="text-right">Net</Table.Head>
 								<Table.Head class="text-right">Gross</Table.Head>
@@ -169,6 +171,15 @@
 										{app.closedInstalls}
 									</Table.Cell>
 									<Table.Cell class="text-right tabular-nums">
+										{#if app.mrrCents}
+											<span title="{app.activeSubscriptions} live subscription(s), billed at the end of each cycle">
+												{money(app.mrrCents)}
+											</span>
+										{:else}
+											<span class="text-muted-foreground">—</span>
+										{/if}
+									</Table.Cell>
+									<Table.Cell class="text-right tabular-nums">
 										{money(app.thisMonthGrossCents)}
 									</Table.Cell>
 									<Table.Cell class="text-right tabular-nums text-muted-foreground">
@@ -191,6 +202,9 @@
 								<Table.Cell class="text-right tabular-nums">{m.activeInstalls}</Table.Cell>
 								<Table.Cell class="text-right tabular-nums">{m.churnedInstalls}</Table.Cell>
 								<Table.Cell class="text-right tabular-nums">{m.closedInstalls}</Table.Cell>
+								<Table.Cell class="text-right tabular-nums">
+									{money(data.perApp.reduce((a, x) => a + x.mrrCents, 0))}
+								</Table.Cell>
 								<Table.Cell class="text-right tabular-nums">
 									{money(r.thisMonthGrossCents)}
 								</Table.Cell>

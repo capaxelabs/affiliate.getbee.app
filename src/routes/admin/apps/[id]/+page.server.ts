@@ -2,7 +2,12 @@ import { error } from '@sveltejs/kit';
 import { and, count, desc, eq, isNotNull, isNull, like, or, sql } from 'drizzle-orm';
 import { requireAdminAccess, scopeCoversApp } from '$lib/server/scope';
 import { apps, installs, merchants, partnerAccounts } from '$lib/server/db/schema';
-import { appLifecycleSeries, revenueByApp, revenueSeries } from '$lib/server/services/stats';
+import {
+	appChargeList,
+	appLifecycleSeries,
+	revenueByApp,
+	revenueSeries
+} from '$lib/server/services/stats';
 import type { PageServerLoad } from './$types';
 
 /** Merchants per page. Small enough that the page stays quick on D1. */
@@ -74,11 +79,12 @@ export const load: PageServerLoad = async (event) => {
 	const requested = Number(params.get('page') ?? 1);
 	const page = Math.min(pageCount, Math.max(1, Number.isFinite(requested) ? requested : 1));
 
-	const [revenue, revenue12m, lifecycle, [extras], merchantRows, countries, plans] =
+	const [revenue, revenue12m, lifecycle, charges, [extras], merchantRows, countries, plans] =
 		await Promise.all([
 			revenueByApp(db, [id]),
 			revenueSeries(db, [id]),
 			appLifecycleSeries(db, id),
+			appChargeList(db, id),
 			// Correlated subqueries have to name the outer table explicitly: drizzle
 			// renders select-list columns unqualified, so `apps.id` alone becomes a
 			// self-reference and matches every row.
@@ -155,6 +161,7 @@ export const load: PageServerLoad = async (event) => {
 		},
 		revenueSeries: revenue12m,
 		lifecycleSeries: lifecycle,
+		charges,
 		merchants: merchantRows.map((m) => ({
 			...m,
 			// Hide the affiliate link from staff who cannot see the program.

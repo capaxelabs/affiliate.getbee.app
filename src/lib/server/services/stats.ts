@@ -2,6 +2,7 @@ import { and, count, desc, eq, gte, inArray, lte, sql, sum } from 'drizzle-orm';
 import type { DrizzleClient } from '$lib/server/db';
 import {
 	affiliates,
+	appCharges,
 	apps,
 	commissions,
 	installEvents,
@@ -442,6 +443,10 @@ export type AppRevenueRow = {
 	churnedInstalls: number;
 	/** Shops Shopify closed or froze. Not churn, but not active either. */
 	closedInstalls: number;
+	/** Monthly value of live subscriptions. Committed, not yet billed. */
+	mrrCents: number;
+	/** Paid plans only — free tiers are charges too, and counting them misleads. */
+	activeSubscriptions: number;
 	commissionCents: number;
 };
 
@@ -480,6 +485,15 @@ export async function revenueByApp(
 			closedInstalls: sql<number>`(
 				select count(*) from installs i where i.app_id = apps.id and i.status = 'closed'
 			)`,
+			mrrCents: sql<number>`(
+				select coalesce(sum(ch.amount_cents), 0) from app_charges ch
+				where ch.app_id = apps.id and ch.kind = 'recurring' and ch.status = 'active'
+			)`,
+			activeSubscriptions: sql<number>`(
+				select count(*) from app_charges ch
+				where ch.app_id = apps.id and ch.kind = 'recurring' and ch.status = 'active'
+					and ch.amount_cents > 0
+			)`,
 			commissionCents: sql<number>`(
 				select coalesce(sum(c.amount_cents), 0) from commissions c where c.app_id = apps.id
 			)`
@@ -497,6 +511,8 @@ export async function revenueByApp(
 		totalInstalls: zero(r.totalInstalls),
 		churnedInstalls: zero(r.churnedInstalls),
 		closedInstalls: zero(r.closedInstalls),
+		mrrCents: zero(r.mrrCents),
+		activeSubscriptions: zero(r.activeSubscriptions),
 		commissionCents: zero(r.commissionCents)
 	}));
 }
@@ -525,6 +541,33 @@ export async function revenueSeries(db: DrizzleClient, scope: AppScope = null, m
 		.orderBy(sql`strftime('%Y-%m', ${transactions.occurredAt}, 'unixepoch')`);
 
 	return rows.map((r) => ({ period: r.period, gross: zero(r.gross), net: zero(r.net) }));
+}
+
+/**
+ * Live and recently-ended charges for one app, newest first.
+ *
+ * Committed revenue, which `transactions` cannot show: a subscription bills at
+ * the end of its 30-day cycle, so a plan approved today is real money with no
+ * transaction behind it for a month.
+ */
+export async function appChargeList(db: DrizzleClient, appId: string, limit = 50) {
+	return db
+		.select({
+			id: appCharges.id,
+			shopDomain: appCharges.shopDomain,
+			kind: appCharges.kind,
+			name: appCharges.name,
+			amountCents: appCharges.amountCents,
+			currency: appCharges.currency,
+			status: appCharges.status,
+			activatedAt: appCharges.activatedAt,
+			billingOn: appCharges.billingOn,
+			endedAt: appCharges.endedAt
+		})
+		.from(appCharges)
+		.where(eq(appCharges.appId, appId))
+		.orderBy(desc(appCharges.occurredAt))
+		.limit(limit);
 }
 
 export type LifecyclePoint = { period: string; installed: number; uninstalled: number };

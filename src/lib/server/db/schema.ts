@@ -280,6 +280,58 @@ export const installEvents = sqliteTable(
 	]
 );
 
+/* --------------------------------------------------------------- charges */
+
+/**
+ * A Shopify app charge as it stands right now — one row per charge id, status
+ * folded forward from the Partner event trail.
+ *
+ * This is the other half of app revenue. `transactions` only holds money
+ * Shopify has actually billed, and an app subscription bills at the *end* of
+ * its 30-day cycle: the $200/month plan a merchant approved on 2026-09-12 has
+ * `billingOn` 2026-10-12 and no transaction until then. Reading it as "no
+ * revenue" is wrong, and reading it as revenue is wrong too — so it lives here
+ * as committed, and only `transactions` ever backs a commission.
+ */
+export const appCharges = sqliteTable(
+	'app_charges',
+	{
+		id: text('id')
+			.primaryKey()
+			.$defaultFn(() => newId('chg')),
+		/** gid://shopify/AppSubscription/... — stable, and what makes this idempotent. */
+		partnerChargeId: text('partner_charge_id').notNull(),
+		appId: text('app_id')
+			.notNull()
+			.references(() => apps.id, { onDelete: 'cascade' }),
+		merchantId: text('merchant_id').references(() => merchants.id, { onDelete: 'set null' }),
+		shopDomain: text('shop_domain').notNull(),
+		kind: text('kind', { enum: ['recurring', 'one_time', 'usage', 'credit'] }).notNull(),
+		/** The plan as the merchant sees it, e.g. "Elite Plan - 25000 credits/month". */
+		name: text('name'),
+		amountCents: integer('amount_cents').notNull().default(0),
+		currency: text('currency').notNull().default('USD'),
+		status: text('status', {
+			enum: ['pending', 'active', 'frozen', 'cancelled', 'expired', 'declined']
+		})
+			.notNull()
+			.default('pending'),
+		activatedAt: integer('activated_at', { mode: 'timestamp' }),
+		/** When Shopify next bills this subscription. Null on one-time charges. */
+		billingOn: integer('billing_on', { mode: 'timestamp' }),
+		endedAt: integer('ended_at', { mode: 'timestamp' }),
+		/** Timestamp of the newest event folded in, so a replay cannot regress state. */
+		occurredAt: integer('occurred_at', { mode: 'timestamp' }).notNull().default(now),
+		...timestamps
+	},
+	(t) => [
+		uniqueIndex('app_charges_partner_idx').on(t.partnerChargeId),
+		index('app_charges_app_idx').on(t.appId),
+		index('app_charges_status_idx').on(t.status),
+		index('app_charges_shop_idx').on(t.shopDomain)
+	]
+);
+
 /* ------------------------------------------------------------- app revenue */
 
 /**
@@ -721,6 +773,11 @@ export const installsRelations = relations(installs, ({ one, many }) => ({
 	lifecycleEmails: many(lifecycleEmails)
 }));
 
+export const appChargesRelations = relations(appCharges, ({ one }) => ({
+	app: one(apps, { fields: [appCharges.appId], references: [apps.id] }),
+	merchant: one(merchants, { fields: [appCharges.merchantId], references: [merchants.id] })
+}));
+
 export const installEventsRelations = relations(installEvents, ({ one }) => ({
 	install: one(installs, { fields: [installEvents.installId], references: [installs.id] }),
 	app: one(apps, { fields: [installEvents.appId], references: [apps.id] }),
@@ -791,6 +848,7 @@ export type Commission = typeof commissions.$inferSelect;
 export type Merchant = typeof merchants.$inferSelect;
 export type Install = typeof installs.$inferSelect;
 export type InstallEvent = typeof installEvents.$inferSelect;
+export type AppCharge = typeof appCharges.$inferSelect;
 export type Transaction = typeof transactions.$inferSelect;
 export type LifecycleEmail = typeof lifecycleEmails.$inferSelect;
 export type PartnerAccount = typeof partnerAccounts.$inferSelect;

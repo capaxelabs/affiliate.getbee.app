@@ -50,6 +50,22 @@ export type PartnerRelationshipEvent = {
 	appId: string;
 };
 
+/** A charge moving through its lifecycle on one app. */
+export type PartnerChargeEvent = {
+	kind: 'recurring' | 'one_time' | 'usage' | 'credit';
+	/** What the event did to the charge. */
+	action: 'accepted' | 'activated' | 'frozen' | 'unfrozen' | 'cancelled' | 'expired' | 'declined';
+	occurredAt: string;
+	shopDomain: string | null;
+	shopName: string | null;
+	chargeId: string;
+	name: string | null;
+	amount: { amount: string; currencyCode: string } | null;
+	/** Subscriptions only — when Shopify next bills it. */
+	billingOn: string | null;
+	test: boolean;
+};
+
 const TRANSACTIONS_QUERY = `
 query AffiliateTransactions($after: String, $createdAtMin: DateTime) {
   transactions(first: 100, after: $after, createdAtMin: $createdAtMin) {
@@ -89,8 +105,8 @@ query AffiliateTransactions($after: String, $createdAtMin: DateTime) {
   }
 }`;
 
-const RELATIONSHIP_EVENTS_QUERY = `
-query AppRelationshipEvents($appId: ID!, $after: String, $occurredAtMin: DateTime) {
+const APP_EVENTS_QUERY = `
+query AppEvents($appId: ID!, $after: String, $occurredAtMin: DateTime) {
   app(id: $appId) {
     events(
       first: 100
@@ -101,6 +117,17 @@ query AppRelationshipEvents($appId: ID!, $after: String, $occurredAtMin: DateTim
         RELATIONSHIP_UNINSTALLED
         RELATIONSHIP_DEACTIVATED
         RELATIONSHIP_REACTIVATED
+        SUBSCRIPTION_CHARGE_ACCEPTED
+        SUBSCRIPTION_CHARGE_ACTIVATED
+        SUBSCRIPTION_CHARGE_CANCELED
+        SUBSCRIPTION_CHARGE_DECLINED
+        SUBSCRIPTION_CHARGE_EXPIRED
+        SUBSCRIPTION_CHARGE_FROZEN
+        SUBSCRIPTION_CHARGE_UNFROZEN
+        ONE_TIME_CHARGE_ACCEPTED
+        ONE_TIME_CHARGE_ACTIVATED
+        ONE_TIME_CHARGE_DECLINED
+        ONE_TIME_CHARGE_EXPIRED
       ]
     ) {
       pageInfo { hasNextPage }
@@ -113,11 +140,26 @@ query AppRelationshipEvents($appId: ID!, $after: String, $occurredAtMin: DateTim
           ... on RelationshipReactivated { shop { myshopifyDomain name } }
           ... on RelationshipDeactivated { shop { myshopifyDomain name } }
           ... on RelationshipUninstalled { reason shop { myshopifyDomain name } }
+          ... on SubscriptionChargeAccepted { shop { myshopifyDomain name } charge { ...subscription } }
+          ... on SubscriptionChargeActivated { shop { myshopifyDomain name } charge { ...subscription } }
+          ... on SubscriptionChargeCanceled { shop { myshopifyDomain name } charge { ...subscription } }
+          ... on SubscriptionChargeDeclined { shop { myshopifyDomain name } charge { ...subscription } }
+          ... on SubscriptionChargeExpired { shop { myshopifyDomain name } charge { ...subscription } }
+          ... on SubscriptionChargeFrozen { shop { myshopifyDomain name } charge { ...subscription } }
+          ... on SubscriptionChargeUnfrozen { shop { myshopifyDomain name } charge { ...subscription } }
+          ... on OneTimeChargeAccepted { shop { myshopifyDomain name } charge { ...oneTime } }
+          ... on OneTimeChargeActivated { shop { myshopifyDomain name } charge { ...oneTime } }
+          ... on OneTimeChargeDeclined { shop { myshopifyDomain name } charge { ...oneTime } }
+          ... on OneTimeChargeExpired { shop { myshopifyDomain name } charge { ...oneTime } }
         }
       }
     }
   }
-}`;
+}
+
+fragment subscription on AppSubscription { id name test billingOn amount { amount currencyCode } }
+fragment oneTime on AppPurchaseOneTime { id name test amount { amount currencyCode } }
+`;
 
 const APP_QUERY = `
 query PartnerApp($id: ID!) {
@@ -238,7 +280,7 @@ export async function discoverApps(
 	return [...found].map(([id, name]) => ({ id, name }));
 }
 
-type RelationshipEventsResponse = {
+type AppEventsResponse = {
 	app: {
 		events: {
 			pageInfo: { hasNextPage: boolean };
@@ -249,6 +291,13 @@ type RelationshipEventsResponse = {
 					__typename: string;
 					reason?: string | null;
 					shop?: { myshopifyDomain: string; name: string } | null;
+					charge?: {
+						id: string;
+						name: string | null;
+						test: boolean | null;
+						billingOn?: string | null;
+						amount?: { amount: string; currencyCode: string } | null;
+					} | null;
 				};
 			}[];
 		};
@@ -265,30 +314,50 @@ const RELATIONSHIP_KIND: Record<string, PartnerRelationshipEvent['kind']> = {
 	RelationshipReactivated: 'reactivated'
 };
 
-/** Installs, uninstalls, deactivations and reactivations for one app, in one pass. */
-export async function fetchRelationshipEvents(
+const CHARGE_EVENT: Record<
+	string,
+	{ kind: PartnerChargeEvent['kind']; action: PartnerChargeEvent['action'] }
+> = {
+	SubscriptionChargeAccepted: { kind: 'recurring', action: 'accepted' },
+	SubscriptionChargeActivated: { kind: 'recurring', action: 'activated' },
+	SubscriptionChargeCanceled: { kind: 'recurring', action: 'cancelled' },
+	SubscriptionChargeDeclined: { kind: 'recurring', action: 'declined' },
+	SubscriptionChargeExpired: { kind: 'recurring', action: 'expired' },
+	SubscriptionChargeFrozen: { kind: 'recurring', action: 'frozen' },
+	SubscriptionChargeUnfrozen: { kind: 'recurring', action: 'unfrozen' },
+	OneTimeChargeAccepted: { kind: 'one_time', action: 'accepted' },
+	OneTimeChargeActivated: { kind: 'one_time', action: 'activated' },
+	OneTimeChargeDeclined: { kind: 'one_time', action: 'declined' },
+	OneTimeChargeExpired: { kind: 'one_time', action: 'expired' }
+};
+
+/**
+ * One page of an app's event feed: installs and charges together.
+ *
+ * They come from the same connection, so asking for both costs one request
+ * rather than two — which matters on Workers, where every call out is a
+ * subrequest against a hard per-request cap.
+ */
+export async function fetchAppEvents(
 	credentials: PartnerCredentials,
 	partnerAppId: string,
 	options: { after?: string | null; occurredAtMin?: string | null } = {}
 ): Promise<{
-	events: PartnerRelationshipEvent[];
+	relationships: PartnerRelationshipEvent[];
+	charges: PartnerChargeEvent[];
 	cursor: string | null;
 	hasNextPage: boolean;
 }> {
-	const data = await request<RelationshipEventsResponse>(
-		credentials,
-		RELATIONSHIP_EVENTS_QUERY,
-		{
-			appId: partnerAppId,
-			after: options.after ?? null,
-			occurredAtMin: options.occurredAtMin ?? null
-		}
-	);
+	const data = await request<AppEventsResponse>(credentials, APP_EVENTS_QUERY, {
+		appId: partnerAppId,
+		after: options.after ?? null,
+		occurredAtMin: options.occurredAtMin ?? null
+	});
 
 	const edges = data.app?.events.edges ?? [];
 
 	return {
-		events: edges.flatMap(({ node }) => {
+		relationships: edges.flatMap(({ node }) => {
 			const kind = RELATIONSHIP_KIND[node.__typename];
 			if (!kind) return [];
 			return [
@@ -299,6 +368,24 @@ export async function fetchRelationshipEvents(
 					shopName: node.shop?.name ?? null,
 					reason: node.reason ?? null,
 					appId: partnerAppId
+				}
+			];
+		}),
+		charges: edges.flatMap(({ node }) => {
+			const mapped = CHARGE_EVENT[node.__typename];
+			if (!mapped || !node.charge) return [];
+			return [
+				{
+					kind: mapped.kind,
+					action: mapped.action,
+					occurredAt: node.occurredAt,
+					shopDomain: node.shop?.myshopifyDomain ?? null,
+					shopName: node.shop?.name ?? null,
+					chargeId: node.charge.id,
+					name: node.charge.name ?? null,
+					amount: node.charge.amount ?? null,
+					billingOn: node.charge.billingOn ?? null,
+					test: Boolean(node.charge.test)
 				}
 			];
 		}),
