@@ -1,5 +1,7 @@
 <script lang="ts">
-	import { goto } from '$app/navigation';
+	import { goto, invalidateAll } from '$app/navigation';
+	import { enhance } from '$app/forms';
+	import { toast } from 'svelte-sonner';
 	import * as Card from '$lib/components/ui/card';
 	import * as Select from '$lib/components/ui/select';
 	import { Input } from '$lib/components/ui/input';
@@ -15,10 +17,44 @@
 	import SearchIcon from '@lucide/svelte/icons/search';
 	import ExternalLinkIcon from '@lucide/svelte/icons/external-link';
 	import StoreIcon from '@lucide/svelte/icons/store';
+	import UploadIcon from '@lucide/svelte/icons/upload';
 	import { INSTALL_STATUS_LABEL, money, shortDate, humanize, plural } from '$lib/format';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
+
+	let importForm = $state<HTMLFormElement | null>(null);
+	let importOffset = $state(0);
+	let importing = $state(false);
+
+	/**
+	 * A big export cannot be applied in one Worker request, so the same file is
+	 * re-sent with a growing offset until the server reports it is done. The
+	 * file input keeps its selection across requestSubmit, which is what makes
+	 * the loop possible.
+	 */
+	const runImport = () => {
+		importing = true;
+		return async ({ result }: any) => {
+			if (result.type === 'success' && result.data?.success) {
+				if (result.data.done) {
+					importing = false;
+					importOffset = 0;
+					if (importForm) importForm.reset();
+					toast.success(result.data.message);
+					await invalidateAll();
+				} else {
+					importOffset = result.data.nextOffset;
+					toast.info(result.data.message);
+					setTimeout(() => importForm?.requestSubmit(), 200);
+				}
+			} else {
+				importing = false;
+				importOffset = 0;
+				toast.error(result.data?.error ?? 'Import failed.');
+			}
+		};
+	};
 
 	// billingOn is stamped when the charge activates and never moves, so once the
 	// date passes it says nothing about the next bill.
@@ -240,6 +276,42 @@
 			</Card.Content>
 		</Card.Root>
 	{/if}
+
+	<Card.Root>
+		<Card.Header>
+			<Card.Title class="text-base">Import history</Card.Title>
+			<Card.Description>
+				Upload the app-history CSV from the Partner dashboard (App → Insights → App
+				history → Export). The API sync reaches back two years; the export carries
+				everything, so this is how an older app gets its full install, churn and charge
+				history in. Safe to re-run — rows already known are skipped.
+			</Card.Description>
+		</Card.Header>
+		<Card.Content>
+			<form
+				method="POST"
+				action="?/importHistory"
+				enctype="multipart/form-data"
+				use:enhance={runImport}
+				bind:this={importForm}
+				class="flex flex-wrap items-center gap-2"
+			>
+				<input type="hidden" name="offset" value={importOffset} />
+				<input
+					type="file"
+					name="history"
+					accept=".csv,text/csv"
+					required
+					disabled={importing}
+					class="max-w-xs text-sm file:mr-3 file:rounded-md file:border file:bg-muted file:px-3 file:py-1.5 file:text-sm"
+				/>
+				<Button type="submit" size="sm" variant="outline" disabled={importing}>
+					<UploadIcon class="size-3.5" />
+					{importing ? 'Importing…' : 'Import CSV'}
+				</Button>
+			</form>
+		</Card.Content>
+	</Card.Root>
 
 	<Card.Root class="gap-0 overflow-hidden p-0">
 		<Card.Header class="border-b px-5 py-4">

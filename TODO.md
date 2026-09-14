@@ -239,6 +239,17 @@ Three roles, one login (email magic-code):
       $200 (t4m9kj-bx, Elite Plan, bills 2026-10-12) and RankFlo $9 (di4820-s0,
       Starter). Verify against the dashboard.
 
+## History import
+
+- [x] Per-app CSV import on the app detail page for the Partner dashboard's
+      app-history export. The API sync reaches back two years; the export
+      carries the app's whole life, so a ten-year-old app backfills from a
+      file. Charge ids and timestamps in the CSV are identical to the API's,
+      so both sources dedupe against each other. The export also carries the
+      shop email — the only signal that identifies a Shopify reviewer store —
+      so imports feed `internal_shops` too. Applied 50 shops per request; the
+      page re-sends the file with a growing offset until done.
+
 ## Abuse signals
 
 - [ ] Three Shootflo shops share the disposable-mail domain `emailinbo.live`

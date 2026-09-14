@@ -1,6 +1,6 @@
-import { error } from '@sveltejs/kit';
+import { error, fail } from '@sveltejs/kit';
 import { and, count, desc, eq, isNotNull, isNull, like, or, sql } from 'drizzle-orm';
-import { requireAdminAccess, scopeCoversApp } from '$lib/server/scope';
+import { requireAdminAccess, requireOwner, scopeCoversApp } from '$lib/server/scope';
 import { apps, installs, merchants, partnerAccounts } from '$lib/server/db/schema';
 import {
 	appChargeList,
@@ -8,7 +8,8 @@ import {
 	revenueByApp,
 	revenueSeries
 } from '$lib/server/services/stats';
-import type { PageServerLoad } from './$types';
+import { applyHistoryChunk, parseAppHistoryCsv } from '$lib/server/services/history-import';
+import type { Actions, PageServerLoad } from './$types';
 
 /** Merchants per page. Small enough that the page stays quick on D1. */
 const PAGE_SIZE = 25;
@@ -176,4 +177,79 @@ export const load: PageServerLoad = async (event) => {
 		pageSize: PAGE_SIZE,
 		merchantCount
 	};
+};
+
+export const actions: Actions = {
+	/**
+	 * Imports the Partner dashboard's "App history" CSV export.
+	 *
+	 * The API sync reaches back two years at most; the CSV carries the app's
+	 * whole life, so this is how a long-lived app gets its early history in.
+	 * The file is re-sent with a growing offset until every shop is applied —
+	 * one request cannot hold more than a slice of D1 calls on Workers.
+	 */
+	importHistory: async (event) => {
+		await requireOwner(event);
+		const appId = event.params.id;
+
+		const [app] = await event.locals.db
+			.select({ id: apps.id, slug: apps.slug })
+			.from(apps)
+			.where(eq(apps.id, appId))
+			.limit(1);
+		if (!app) return fail(404, { error: 'App not found.' });
+
+		const form = await event.request.formData();
+		const file = form.get('history');
+		const offset = Math.max(0, Number(form.get('offset') ?? 0) || 0);
+
+		if (!(file instanceof File) || !file.size) {
+			return fail(400, { error: 'Choose the CSV exported from the Partner dashboard.' });
+		}
+		if (file.size > 20 * 1024 * 1024) {
+			return fail(400, { error: 'That file is over 20 MB — not an app-history export.' });
+		}
+
+		// The export is named shopify-<app-handle>-app-history-<date>.csv. When
+		// the handle in the name belongs to a *different* app we track, this is
+		// almost certainly the wrong file picked for the right button — refuse
+		// rather than write one app's history onto another.
+		const handle = file.name.match(/^shopify-(.+)-app-history/)?.[1];
+		if (handle && handle !== app.slug) {
+			const [other] = await event.locals.db
+				.select({ name: apps.name })
+				.from(apps)
+				.where(eq(apps.slug, handle))
+				.limit(1);
+			if (other) {
+				return fail(400, {
+					error: `That file looks like ${other.name}'s history — import it from that app's page.`
+				});
+			}
+		}
+
+		let parsed;
+		try {
+			parsed = parseAppHistoryCsv(await file.text());
+		} catch (err) {
+			return fail(400, { error: err instanceof Error ? err.message : 'Could not parse that file.' });
+		}
+		if (!parsed.shops.size) {
+			return fail(400, { error: 'No usable rows found in that file.' });
+		}
+
+		const result = await applyHistoryChunk(event.locals.db, { appId, parsed, offset });
+		const done = result.remainingShops === 0;
+		const processedSoFar = offset + result.processedShops;
+
+		return {
+			success: true,
+			done,
+			nextOffset: processedSoFar,
+			remaining: result.remainingShops,
+			message: done
+				? `Imported ${parsed.shops.size} shops (${parsed.totalRows} rows, ${parsed.skippedRows} skipped, ${result.internalSkipped} internal).`
+				: `${processedSoFar} of ${parsed.shops.size} shops imported — continuing…`
+		};
+	}
 };
