@@ -26,9 +26,6 @@ const STATUS_FOR_ACTION: Record<PartnerChargeEvent['action'], ChargeStatus> = {
 
 const ENDED: ChargeStatus[] = ['cancelled', 'expired', 'declined'];
 
-/** A subscription Shopify will bill again. The only thing that counts toward MRR. */
-export const EARNING_STATUSES: ChargeStatus[] = ['active'];
-
 function dateOrNull(value: string | null | undefined) {
 	if (!value) return null;
 	// billingOn is a bare date ("2026-10-12"); everything else is an ISO stamp.
@@ -42,10 +39,10 @@ export type ChargeSyncResult = { seen: number; written: number };
  * Folds a window of charge events into `app_charges`, one row per charge.
  *
  * Test charges are dropped rather than stored. Most of the history on a
- * developed app is a developer clicking through plans on a dev store — 55 of
- * Shootflo Studio's 68 charge events — and keeping them would both distort
- * every total and cost a write each, which on Workers is a subrequest against
- * a hard per-request cap.
+ * developed app is a developer clicking through plans on a dev store — 83 of
+ * Shootflo Studio's 92 charge events, and 281 of 330 across the eight apps —
+ * and keeping them would both distort every total and cost a write each, which
+ * on Workers is a subrequest against a hard per-request cap.
  *
  * Events are grouped by charge before anything is written, so a charge that
  * was accepted, activated and cancelled inside one window costs one write
