@@ -59,14 +59,32 @@
 	const installPoints = $derived(
 		data.dailyInstalls.points.map((p) => ({ ...p, date: new Date(`${p.date}T00:00:00Z`) }))
 	);
+	/**
+	 * Legend chips toggle series. Empty selection means everything — clicking
+	 * the last active chip off is the reset, so there is no separate control.
+	 */
+	let selectedApps = $state<string[]>([]);
+
+	function toggleApp(slug: string) {
+		selectedApps = selectedApps.includes(slug)
+			? selectedApps.filter((s) => s !== slug)
+			: [...selectedApps, slug];
+	}
+
+	const visibleApps = $derived(
+		selectedApps.length
+			? data.dailyInstalls.apps.filter((app) => selectedApps.includes(app.slug))
+			: data.dailyInstalls.apps
+	);
 	const installSeries = $derived(
-		data.dailyInstalls.apps.map((app) => ({
+		visibleApps.map((app) => ({
 			key: app.slug,
 			label: app.name,
 			color: `var(--color-${app.slug})`
 		}))
 	);
 	const installTotal30d = $derived(data.dailyInstalls.apps.reduce((a, x) => a + x.total, 0));
+	const visibleTotal = $derived(visibleApps.reduce((a, x) => a + x.total, 0));
 
 	const grossSeries = $derived(data.series.map((p) => ({ period: p.period, value: p.gross })));
 	const netSeries = $derived(data.series.map((p) => ({ period: p.period, value: p.net })));
@@ -140,9 +158,12 @@
 			<Card.Title class="text-base">Daily installs</Card.Title>
 			<Card.Description>
 				New installs per app over the last 30 days — reinstalls count, closed stores don't.
+				Click an app below to focus its line; click again to bring the rest back.
 			</Card.Description>
 			<Card.Action>
-				<span class="text-sm font-medium tabular-nums">{installTotal30d} total</span>
+				<span class="text-sm font-medium tabular-nums">
+					{visibleTotal} {selectedApps.length ? 'selected' : 'total'}
+				</span>
 			</Card.Action>
 		</Card.Header>
 		<Card.Content class="px-5 py-4">
@@ -175,16 +196,25 @@
 						{/snippet}
 					</LineChart>
 				</Chart.Container>
-				<div class="mt-3 flex flex-wrap gap-x-4 gap-y-1.5">
+				<div class="mt-3 flex flex-wrap gap-1.5">
 					{#each data.dailyInstalls.apps as app, i (app.slug)}
-						<span class="flex items-center gap-1.5 text-xs text-muted-foreground">
+						{@const active = !selectedApps.length || selectedApps.includes(app.slug)}
+						<button
+							type="button"
+							onclick={() => toggleApp(app.slug)}
+							class="flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors
+								{selectedApps.includes(app.slug)
+								? 'border-foreground/20 bg-muted font-medium'
+								: 'border-transparent text-muted-foreground hover:bg-muted/60'}
+								{active ? '' : 'opacity-40'}"
+						>
 							<span
 								class="size-2 rounded-full"
 								style="background: var(--chart-{(i % 8) + 1})"
 							></span>
 							{app.name}
 							<span class="tabular-nums">{app.total}</span>
-						</span>
+						</button>
 					{/each}
 				</div>
 			{/if}
