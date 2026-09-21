@@ -3,6 +3,7 @@ import { requireAdminAccess, appScopeFilter } from '$lib/server/scope';
 import {
 	adminSummary,
 	merchantTotals,
+	dailyInstallsByApp,
 	revenueByApp,
 	revenueSeries,
 	revenueTotals
@@ -21,6 +22,7 @@ export const load: PageServerLoad = async (event) => {
 		revenue,
 		perApp,
 		series,
+		dailyInstalls,
 		merchants,
 		pendingAffiliates,
 		pendingClaims,
@@ -30,6 +32,7 @@ export const load: PageServerLoad = async (event) => {
 		revenueTotals(db, scope.appIds),
 		revenueByApp(db, scope.appIds),
 		revenueSeries(db, scope.appIds),
+		dailyInstallsByApp(db, scope.appIds),
 		merchantTotals(db, scope.appIds),
 		scope.role === 'admin'
 			? db
@@ -93,6 +96,7 @@ export const load: PageServerLoad = async (event) => {
 		revenue,
 		perApp,
 		series,
+		dailyInstalls,
 		merchants,
 		pendingAffiliates: showAffiliates ? pendingAffiliates : [],
 		pendingClaims: showAffiliates ? pendingClaims : [],

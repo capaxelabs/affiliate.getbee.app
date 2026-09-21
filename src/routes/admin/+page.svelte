@@ -17,6 +17,10 @@
 	import HandCoinsIcon from '@lucide/svelte/icons/hand-coins';
 	import PackageIcon from '@lucide/svelte/icons/package';
 	import RepeatIcon from '@lucide/svelte/icons/repeat';
+	import * as Chart from '$lib/components/ui/chart';
+	import { LineChart } from 'layerchart';
+	import { scaleUtc } from 'd3-scale';
+	import { curveMonotoneX } from 'd3-shape';
 	import { money, relativeTime } from '$lib/format';
 	import { REFERRAL_STATUS_LABEL, SOURCE_LABEL } from '$lib/constants';
 	import type { PageData } from './$types';
@@ -41,6 +45,28 @@
 
 	const mrrCents = $derived(data.perApp.reduce((a, x) => a + x.mrrCents, 0));
 	const paidSubs = $derived(data.perApp.reduce((a, x) => a + x.activeSubscriptions, 0));
+
+	// One line per app; slugs key both the series and the --color-* variables
+	// the chart wrapper generates from this config.
+	const installChartConfig = $derived(
+		Object.fromEntries(
+			data.dailyInstalls.apps.map((app, i) => [
+				app.slug,
+				{ label: app.name, color: `var(--chart-${(i % 8) + 1})` }
+			])
+		) satisfies Chart.ChartConfig
+	);
+	const installPoints = $derived(
+		data.dailyInstalls.points.map((p) => ({ ...p, date: new Date(`${p.date}T00:00:00Z`) }))
+	);
+	const installSeries = $derived(
+		data.dailyInstalls.apps.map((app) => ({
+			key: app.slug,
+			label: app.name,
+			color: `var(--color-${app.slug})`
+		}))
+	);
+	const installTotal30d = $derived(data.dailyInstalls.apps.reduce((a, x) => a + x.total, 0));
 
 	const grossSeries = $derived(data.series.map((p) => ({ period: p.period, value: p.gross })));
 	const netSeries = $derived(data.series.map((p) => ({ period: p.period, value: p.net })));
@@ -108,6 +134,62 @@
 			/>
 		{/if}
 	</div>
+
+	<Card.Root class="gap-0 p-0">
+		<Card.Header class="border-b px-5 py-4">
+			<Card.Title class="text-base">Daily installs</Card.Title>
+			<Card.Description>
+				New installs per app over the last 30 days — reinstalls count, closed stores don't.
+			</Card.Description>
+			<Card.Action>
+				<span class="text-sm font-medium tabular-nums">{installTotal30d} total</span>
+			</Card.Action>
+		</Card.Header>
+		<Card.Content class="px-5 py-4">
+			{#if installTotal30d === 0}
+				<p class="py-12 text-center text-sm text-muted-foreground">
+					No installs recorded in the last 30 days.
+				</p>
+			{:else}
+				<Chart.Container config={installChartConfig} class="aspect-auto h-64 w-full">
+					<LineChart
+						data={installPoints}
+						x="date"
+						xScale={scaleUtc()}
+						axis="x"
+						series={installSeries}
+						props={{
+							spline: { curve: curveMonotoneX, motion: 'tween', strokeWidth: 1.5 },
+							xAxis: {
+								format: (v: Date) =>
+									v.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+							},
+							highlight: { points: { r: 3 } }
+						}}
+					>
+						{#snippet tooltip()}
+							<Chart.Tooltip
+								labelFormatter={(v: Date) =>
+									v.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+							/>
+						{/snippet}
+					</LineChart>
+				</Chart.Container>
+				<div class="mt-3 flex flex-wrap gap-x-4 gap-y-1.5">
+					{#each data.dailyInstalls.apps as app, i (app.slug)}
+						<span class="flex items-center gap-1.5 text-xs text-muted-foreground">
+							<span
+								class="size-2 rounded-full"
+								style="background: var(--chart-{(i % 8) + 1})"
+							></span>
+							{app.name}
+							<span class="tabular-nums">{app.total}</span>
+						</span>
+					{/each}
+				</div>
+			{/if}
+		</Card.Content>
+	</Card.Root>
 
 	<div class="grid gap-4 lg:grid-cols-2">
 		<ReportCard
