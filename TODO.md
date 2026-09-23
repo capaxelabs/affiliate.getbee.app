@@ -268,6 +268,9 @@ Three roles, one login (email magic-code):
 - [x] Total line on the daily-installs chart: sum of every app in scope per day,
       its own legend chip, hidden when there is only one app. Built from the
       same per-app rows, so new apps are included without code changes.
+- [x] Running-total chart under the daily one, sharing its legend: each app's
+      installs to date plus the combined total, seeded with the count from
+      before the window so day one starts at the real lifetime number.
 
 - [ ] Merchant detail page (timeline of install events, revenue, emails sent)
 - [ ] Let staff export the app analytics they can see (CSV)

@@ -1,4 +1,4 @@
-import { and, count, desc, eq, gte, inArray, lte, sql, sum } from 'drizzle-orm';
+import { and, count, desc, eq, gte, inArray, lt, lte, sql, sum } from 'drizzle-orm';
 import type { DrizzleClient } from '$lib/server/db';
 import {
 	affiliates,
@@ -544,7 +544,11 @@ export async function revenueSeries(db: DrizzleClient, scope: AppScope = null, m
 }
 
 export type DailyInstallSeries = {
-	apps: { slug: string; name: string; total: number }[];
+	/**
+	 * `total` is the window, `priorTotal` everything before it — together they
+	 * let a running-total line start at the real lifetime count instead of zero.
+	 */
+	apps: { slug: string; name: string; total: number; priorTotal: number }[];
 	/** One row per day, zero-filled: { date: 'YYYY-MM-DD', [slug]: count }. */
 	points: Record<string, string | number>[];
 };
@@ -567,7 +571,9 @@ export async function dailyInstallsByApp(
 
 	const day = sql<string>`date(${installEvents.occurredAt}, 'unixepoch')`;
 
-	const [appRows, counts] = await Promise.all([
+	const eventScope = ids === null ? undefined : inArray(installEvents.appId, ids.length ? ids : ['']);
+
+	const [appRows, counts, prior] = await Promise.all([
 		db
 			.select({ id: apps.id, slug: apps.slug, name: apps.name })
 			.from(apps)
@@ -576,14 +582,13 @@ export async function dailyInstallsByApp(
 		db
 			.select({ day, appId: installEvents.appId, value: count() })
 			.from(installEvents)
-			.where(
-				and(
-					eq(installEvents.type, 'installed'),
-					gte(installEvents.occurredAt, from),
-					ids === null ? undefined : inArray(installEvents.appId, ids.length ? ids : [''])
-				)
-			)
-			.groupBy(day, installEvents.appId)
+			.where(and(eq(installEvents.type, 'installed'), gte(installEvents.occurredAt, from), eventScope))
+			.groupBy(day, installEvents.appId),
+		db
+			.select({ appId: installEvents.appId, value: count() })
+			.from(installEvents)
+			.where(and(eq(installEvents.type, 'installed'), lt(installEvents.occurredAt, from), eventScope))
+			.groupBy(installEvents.appId)
 	]);
 
 	const slugById = new Map(appRows.map((a) => [a.id, a.slug]));
@@ -605,8 +610,19 @@ export async function dailyInstallsByApp(
 		totals.set(slug, (totals.get(slug) ?? 0) + zero(row.value));
 	}
 
+	const priorBySlug = new Map<string, number>();
+	for (const row of prior) {
+		const slug = slugById.get(row.appId);
+		if (slug) priorBySlug.set(slug, zero(row.value));
+	}
+
 	return {
-		apps: appRows.map((a) => ({ slug: a.slug, name: a.name, total: totals.get(a.slug) ?? 0 })),
+		apps: appRows.map((a) => ({
+			slug: a.slug,
+			name: a.name,
+			total: totals.get(a.slug) ?? 0,
+			priorTotal: priorBySlug.get(a.slug) ?? 0
+		})),
 		points: [...byDay.values()]
 	};
 }
