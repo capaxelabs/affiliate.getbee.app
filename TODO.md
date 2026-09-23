@@ -265,12 +265,11 @@ Three roles, one login (email magic-code):
 - [x] Daily-installs line chart on the admin overview: one series per app,
       last 30 days, zero-filled so quiet days touch the baseline. Legend
       carries each app's 30-day total.
-- [x] Total line on the daily-installs chart: sum of every app in scope per day,
-      its own legend chip, hidden when there is only one app. Built from the
-      same per-app rows, so new apps are included without code changes.
-- [x] Running-total chart under the daily one, sharing its legend: each app's
-      installs to date plus the combined total, seeded with the count from
-      before the window so day one starts at the real lifetime number.
+- [x] Live-installs chart under the daily one, sharing its legend: how many
+      installs each app still has, walked back from today's `status = 'installed'`
+      count so the last point always matches the tables. No cross-app total line
+      on either chart — a sum of installs-ever was the wrong number and it
+      flattened every app against it.
 
 - [ ] Merchant detail page (timeline of install events, revenue, emails sent)
 - [ ] Let staff export the app analytics they can see (CSV)

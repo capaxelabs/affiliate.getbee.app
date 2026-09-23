@@ -1,4 +1,4 @@
-import { and, count, desc, eq, gte, inArray, lt, lte, sql, sum } from 'drizzle-orm';
+import { and, count, desc, eq, gte, inArray, lte, sql, sum } from 'drizzle-orm';
 import type { DrizzleClient } from '$lib/server/db';
 import {
 	affiliates,
@@ -544,19 +544,26 @@ export async function revenueSeries(db: DrizzleClient, scope: AppScope = null, m
 }
 
 export type DailyInstallSeries = {
-	/**
-	 * `total` is the window, `priorTotal` everything before it — together they
-	 * let a running-total line start at the real lifetime count instead of zero.
-	 */
-	apps: { slug: string; name: string; total: number; priorTotal: number }[];
-	/** One row per day, zero-filled: { date: 'YYYY-MM-DD', [slug]: count }. */
+	/** `newInstalls` is the window; `activeInstalls` is what is live right now. */
+	apps: { slug: string; name: string; newInstalls: number; activeInstalls: number }[];
+	/** One row per day, zero-filled: { date: 'YYYY-MM-DD', [slug]: installs that day }. */
 	points: Record<string, string | number>[];
+	/** The same days: { date, [slug]: installs still live at the end of that day }. */
+	activePoints: Record<string, string | number>[];
 };
 
 /**
- * Installs per app per day, zero-filled across the whole window so every
- * series has a point for every day — a line chart drops to the baseline on a
- * quiet day instead of skipping it.
+ * Two series per app over the same window.
+ *
+ * `points` counts `installed` events per day, zero-filled so a quiet day drops
+ * the line to the baseline instead of skipping it.
+ *
+ * `activePoints` is the live install count. It starts from what is live today
+ * — the same `status = 'installed'` count the tables show — and walks the
+ * window backwards, undoing each day's events: an install subtracts, an
+ * uninstall or a deactivation adds back. Deriving it from today rather than
+ * summing history forward means the last point always matches the number
+ * printed everywhere else, even where the event trail is incomplete.
  */
 export async function dailyInstallsByApp(
 	db: DrizzleClient,
@@ -571,59 +578,96 @@ export async function dailyInstallsByApp(
 
 	const day = sql<string>`date(${installEvents.occurredAt}, 'unixepoch')`;
 
-	const eventScope = ids === null ? undefined : inArray(installEvents.appId, ids.length ? ids : ['']);
-
-	const [appRows, counts, prior] = await Promise.all([
+	const [appRows, events, live] = await Promise.all([
 		db
 			.select({ id: apps.id, slug: apps.slug, name: apps.name })
 			.from(apps)
 			.where(appFilter)
 			.orderBy(apps.name),
 		db
-			.select({ day, appId: installEvents.appId, value: count() })
+			.select({ day, appId: installEvents.appId, type: installEvents.type, value: count() })
 			.from(installEvents)
-			.where(and(eq(installEvents.type, 'installed'), gte(installEvents.occurredAt, from), eventScope))
-			.groupBy(day, installEvents.appId),
+			.where(
+				and(
+					inArray(installEvents.type, ['installed', 'uninstalled', 'deactivated']),
+					gte(installEvents.occurredAt, from),
+					ids === null ? undefined : inArray(installEvents.appId, ids.length ? ids : [''])
+				)
+			)
+			.groupBy(day, installEvents.appId, installEvents.type),
 		db
-			.select({ appId: installEvents.appId, value: count() })
-			.from(installEvents)
-			.where(and(eq(installEvents.type, 'installed'), lt(installEvents.occurredAt, from), eventScope))
-			.groupBy(installEvents.appId)
+			.select({ appId: installs.appId, value: count() })
+			.from(installs)
+			.where(
+				and(
+					eq(installs.status, 'installed'),
+					ids === null ? undefined : inArray(installs.appId, ids.length ? ids : [''])
+				)
+			)
+			.groupBy(installs.appId)
 	]);
 
 	const slugById = new Map(appRows.map((a) => [a.id, a.slug]));
-	const totals = new Map<string, number>();
-	const byDay = new Map<string, Record<string, string | number>>();
+	const dates = Array.from({ length: days }, (_, i) =>
+		new Date(from.getTime() + i * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+	);
 
-	for (let i = 0; i < days; i++) {
-		const date = new Date(from.getTime() + i * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+	const blank = () => new Map(appRows.map((a) => [a.slug, 0]));
+	const added = new Map(dates.map((d) => [d, blank()]));
+	const removed = new Map(dates.map((d) => [d, blank()]));
+
+	for (const row of events) {
+		const slug = slugById.get(row.appId);
+		const bucket = row.type === 'installed' ? added : removed;
+		const counts = slug ? bucket.get(row.day) : undefined;
+		if (!slug || !counts) continue;
+		counts.set(slug, (counts.get(slug) ?? 0) + zero(row.value));
+	}
+
+	const newInstalls = blank();
+	const points = dates.map((date) => {
 		const row: Record<string, string | number> = { date };
-		for (const app of appRows) row[app.slug] = 0;
-		byDay.set(date, row);
+		for (const app of appRows) {
+			const value = added.get(date)?.get(app.slug) ?? 0;
+			row[app.slug] = value;
+			newInstalls.set(app.slug, (newInstalls.get(app.slug) ?? 0) + value);
+		}
+		return row;
+	});
+
+	const liveBySlug = blank();
+	for (const row of live) {
+		const slug = slugById.get(row.appId);
+		if (slug) liveBySlug.set(slug, zero(row.value));
 	}
 
-	for (const row of counts) {
-		const slug = slugById.get(row.appId);
-		const point = byDay.get(row.day);
-		if (!slug || !point) continue;
-		point[slug] = zero(row.value);
-		totals.set(slug, (totals.get(slug) ?? 0) + zero(row.value));
-	}
+	const running = new Map(liveBySlug);
+	const activePoints: Record<string, string | number>[] = [];
+	for (let i = days - 1; i >= 0; i--) {
+		const date = dates[i];
+		const row: Record<string, string | number> = { date };
+		for (const app of appRows) row[app.slug] = running.get(app.slug) ?? 0;
+		activePoints[i] = row;
 
-	const priorBySlug = new Map<string, number>();
-	for (const row of prior) {
-		const slug = slugById.get(row.appId);
-		if (slug) priorBySlug.set(slug, zero(row.value));
+		// Step back over the day just recorded to reach the previous day's close.
+		for (const app of appRows) {
+			const before =
+				(running.get(app.slug) ?? 0) -
+				(added.get(date)?.get(app.slug) ?? 0) +
+				(removed.get(date)?.get(app.slug) ?? 0);
+			running.set(app.slug, Math.max(0, before));
+		}
 	}
 
 	return {
 		apps: appRows.map((a) => ({
 			slug: a.slug,
 			name: a.name,
-			total: totals.get(a.slug) ?? 0,
-			priorTotal: priorBySlug.get(a.slug) ?? 0
+			newInstalls: newInstalls.get(a.slug) ?? 0,
+			activeInstalls: liveBySlug.get(a.slug) ?? 0
 		})),
-		points: [...byDay.values()]
+		points,
+		activePoints
 	};
 }
 

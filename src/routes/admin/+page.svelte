@@ -46,69 +46,28 @@
 	const mrrCents = $derived(data.perApp.reduce((a, x) => a + x.mrrCents, 0));
 	const paidSubs = $derived(data.perApp.reduce((a, x) => a + x.activeSubscriptions, 0));
 
-	// Slugs never contain an underscore, so this key cannot collide with an app.
-	const TOTAL_KEY = '_total';
-	const installTotal30d = $derived(data.dailyInstalls.apps.reduce((a, x) => a + x.total, 0));
-	// With one app the total line would sit exactly on top of it.
-	const showTotal = $derived(data.dailyInstalls.apps.length > 1);
-
-	// One line per app plus the total; keys drive both the series and the
-	// --color-* variables the chart wrapper generates from the config.
-	const installLegend = $derived([
-		...(showTotal
-			? [
-					{
-						key: TOTAL_KEY,
-						name: 'Total',
-						total: installTotal30d,
-						lifetime: data.dailyInstalls.apps.reduce((a, x) => a + x.priorTotal + x.total, 0),
-						color: 'var(--foreground)'
-					}
-				]
-			: []),
-		...data.dailyInstalls.apps.map((app, i) => ({
+	// One line per app; slugs key both the series and the --color-* variables
+	// the chart wrapper generates from this config.
+	const installLegend = $derived(
+		data.dailyInstalls.apps.map((app, i) => ({
 			key: app.slug,
 			name: app.name,
-			total: app.total,
-			lifetime: app.priorTotal + app.total,
+			newInstalls: app.newInstalls,
+			activeInstalls: app.activeInstalls,
 			color: `var(--chart-${(i % 8) + 1})`
 		}))
-	]);
+	);
 	const installChartConfig = $derived(
 		Object.fromEntries(
 			installLegend.map((l) => [l.key, { label: l.name, color: l.color }])
 		) satisfies Chart.ChartConfig
 	);
-	const installPoints = $derived(
-		data.dailyInstalls.points.map((p) => ({
-			...p,
-			date: new Date(`${p.date}T00:00:00Z`),
-			[TOTAL_KEY]: data.dailyInstalls.apps.reduce((a, app) => a + Number(p[app.slug] ?? 0), 0)
-		}))
-	);
-	/**
-	 * The same days as a running total: each app carries everything it
-	 * installed before the window, so day one starts at the real lifetime
-	 * count rather than zero.
-	 */
-	const cumulativePoints = $derived.by(() => {
-		const running = new Map(data.dailyInstalls.apps.map((a) => [a.slug, a.priorTotal]));
-		return data.dailyInstalls.points.map((p) => {
-			const row: Record<string, Date | number> = { date: new Date(`${p.date}T00:00:00Z`) };
-			let total = 0;
-			for (const app of data.dailyInstalls.apps) {
-				const soFar = (running.get(app.slug) ?? 0) + Number(p[app.slug] ?? 0);
-				running.set(app.slug, soFar);
-				row[app.slug] = soFar;
-				total += soFar;
-			}
-			row[TOTAL_KEY] = total;
-			return row;
-		});
-	});
-	const installLifetime = $derived(
-		data.dailyInstalls.apps.reduce((a, x) => a + x.priorTotal + x.total, 0)
-	);
+	const withDate = (rows: Record<string, string | number>[]) =>
+		rows.map((p) => ({ ...p, date: new Date(`${p.date}T00:00:00Z`) }));
+	const installPoints = $derived(withDate(data.dailyInstalls.points));
+	const activePoints = $derived(withDate(data.dailyInstalls.activePoints));
+	const newInWindow = $derived(data.dailyInstalls.apps.reduce((a, x) => a + x.newInstalls, 0));
+	const liveNow = $derived(data.dailyInstalls.apps.reduce((a, x) => a + x.activeInstalls, 0));
 	/**
 	 * Legend chips toggle series. Empty selection means everything — clicking
 	 * the last active chip off is the reset, so there is no separate control.
@@ -127,19 +86,13 @@
 			: installLegend
 	);
 	const installSeries = $derived(
-		visibleLines.map((l) => ({
-			key: l.key,
-			label: l.name,
-			color: `var(--color-${l.key})`,
-			props: l.key === TOTAL_KEY ? { strokeWidth: 2.25 } : undefined
-		}))
+		visibleLines.map((l) => ({ key: l.key, label: l.name, color: `var(--color-${l.key})` }))
 	);
-	const wholeProgram = $derived(!selectedApps.length || selectedApps.includes(TOTAL_KEY));
-	const visibleTotal = $derived(
-		wholeProgram ? installTotal30d : visibleLines.reduce((a, x) => a + x.total, 0)
+	const visibleNew = $derived(
+		selectedApps.length ? visibleLines.reduce((a, x) => a + x.newInstalls, 0) : newInWindow
 	);
-	const visibleLifetime = $derived(
-		wholeProgram ? installLifetime : visibleLines.reduce((a, x) => a + x.lifetime, 0)
+	const visibleLive = $derived(
+		selectedApps.length ? visibleLines.reduce((a, x) => a + x.activeInstalls, 0) : liveNow
 	);
 
 	const grossSeries = $derived(data.series.map((p) => ({ period: p.period, value: p.gross })));
@@ -213,18 +166,19 @@
 		<Card.Header class="border-b px-5 py-4">
 			<Card.Title class="text-base">Installs</Card.Title>
 			<Card.Description>
-				New installs per day and the running total per app, last 30 days, with a Total line
-				across every app. Reinstalls count, closed stores don't. Click a chip below to focus
-				a line in both charts; click again to bring the rest back.
+				New installs per day and how many are still live, per app, over the last 30 days.
+				Reinstalls count as a new install; a live count drops when a shop uninstalls or
+				Shopify closes it. Click a chip below to focus an app in both charts; click again to
+				bring the rest back.
 			</Card.Description>
 			<Card.Action>
 				<span class="text-sm font-medium tabular-nums">
-					{visibleTotal} new · {visibleLifetime} total
+					{visibleNew} new · {visibleLive} live
 				</span>
 			</Card.Action>
 		</Card.Header>
 		<Card.Content class="px-5 py-4">
-			{#if installLifetime === 0}
+			{#if liveNow === 0 && newInWindow === 0}
 				<p class="py-12 text-center text-sm text-muted-foreground">No installs recorded yet.</p>
 			{:else}
 				<p class="mb-1 text-xs font-medium text-muted-foreground">New per day</p>
@@ -233,7 +187,6 @@
 						data={installPoints}
 						x="date"
 						xScale={scaleUtc()}
-						axis="x"
 						series={installSeries}
 						props={{
 							spline: { curve: curveMonotoneX, motion: 'tween', strokeWidth: 1.5 },
@@ -241,6 +194,7 @@
 								format: (v: Date) =>
 									v.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 							},
+							yAxis: { format: (v: number) => (Number.isInteger(v) ? String(v) : '') },
 							highlight: { points: { r: 3 } }
 						}}
 					>
@@ -253,12 +207,10 @@
 					</LineChart>
 				</Chart.Container>
 
-				<p class="mt-5 mb-1 text-xs font-medium text-muted-foreground">
-					Total installs to date
-				</p>
+				<p class="mt-5 mb-1 text-xs font-medium text-muted-foreground">Live installs</p>
 				<Chart.Container config={installChartConfig} class="aspect-auto h-56 w-full">
 					<LineChart
-						data={cumulativePoints}
+						data={activePoints}
 						x="date"
 						xScale={scaleUtc()}
 						series={installSeries}
@@ -268,7 +220,7 @@
 								format: (v: Date) =>
 									v.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 							},
-							yAxis: { format: (v: number) => String(v) },
+							yAxis: { format: (v: number) => (Number.isInteger(v) ? String(v) : '') },
 							highlight: { points: { r: 3 } }
 						}}
 					>
@@ -287,7 +239,7 @@
 						<button
 							type="button"
 							onclick={() => toggleApp(line.key)}
-							title="{line.total} new in 30 days · {line.lifetime} total"
+							title="{line.newInstalls} new in 30 days · {line.activeInstalls} live now"
 							class="flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors
 								{selectedApps.includes(line.key)
 								? 'border-foreground/20 bg-muted font-medium'
@@ -296,8 +248,8 @@
 						>
 							<span class="size-2 rounded-full" style="background: {line.color}"></span>
 							{line.name}
-							<span class="tabular-nums text-muted-foreground">+{line.total}</span>
-							<span class="tabular-nums">{line.lifetime}</span>
+							<span class="tabular-nums text-muted-foreground">+{line.newInstalls}</span>
+							<span class="tabular-nums">{line.activeInstalls}</span>
 						</button>
 					{/each}
 				</div>
