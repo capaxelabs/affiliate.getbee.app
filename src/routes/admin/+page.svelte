@@ -46,18 +46,36 @@
 	const mrrCents = $derived(data.perApp.reduce((a, x) => a + x.mrrCents, 0));
 	const paidSubs = $derived(data.perApp.reduce((a, x) => a + x.activeSubscriptions, 0));
 
-	// One line per app; slugs key both the series and the --color-* variables
-	// the chart wrapper generates from this config.
+	// Slugs never contain an underscore, so this key cannot collide with an app.
+	const TOTAL_KEY = '_total';
+	const installTotal30d = $derived(data.dailyInstalls.apps.reduce((a, x) => a + x.total, 0));
+	// With one app the total line would sit exactly on top of it.
+	const showTotal = $derived(data.dailyInstalls.apps.length > 1);
+
+	// One line per app plus the total; keys drive both the series and the
+	// --color-* variables the chart wrapper generates from the config.
+	const installLegend = $derived([
+		...(showTotal
+			? [{ key: TOTAL_KEY, name: 'Total', total: installTotal30d, color: 'var(--foreground)' }]
+			: []),
+		...data.dailyInstalls.apps.map((app, i) => ({
+			key: app.slug,
+			name: app.name,
+			total: app.total,
+			color: `var(--chart-${(i % 8) + 1})`
+		}))
+	]);
 	const installChartConfig = $derived(
 		Object.fromEntries(
-			data.dailyInstalls.apps.map((app, i) => [
-				app.slug,
-				{ label: app.name, color: `var(--chart-${(i % 8) + 1})` }
-			])
+			installLegend.map((l) => [l.key, { label: l.name, color: l.color }])
 		) satisfies Chart.ChartConfig
 	);
 	const installPoints = $derived(
-		data.dailyInstalls.points.map((p) => ({ ...p, date: new Date(`${p.date}T00:00:00Z`) }))
+		data.dailyInstalls.points.map((p) => ({
+			...p,
+			date: new Date(`${p.date}T00:00:00Z`),
+			[TOTAL_KEY]: data.dailyInstalls.apps.reduce((a, app) => a + Number(p[app.slug] ?? 0), 0)
+		}))
 	);
 	/**
 	 * Legend chips toggle series. Empty selection means everything — clicking
@@ -71,20 +89,24 @@
 			: [...selectedApps, slug];
 	}
 
-	const visibleApps = $derived(
+	const visibleLines = $derived(
 		selectedApps.length
-			? data.dailyInstalls.apps.filter((app) => selectedApps.includes(app.slug))
-			: data.dailyInstalls.apps
+			? installLegend.filter((l) => selectedApps.includes(l.key))
+			: installLegend
 	);
 	const installSeries = $derived(
-		visibleApps.map((app) => ({
-			key: app.slug,
-			label: app.name,
-			color: `var(--color-${app.slug})`
+		visibleLines.map((l) => ({
+			key: l.key,
+			label: l.name,
+			color: `var(--color-${l.key})`,
+			props: l.key === TOTAL_KEY ? { strokeWidth: 2.25 } : undefined
 		}))
 	);
-	const installTotal30d = $derived(data.dailyInstalls.apps.reduce((a, x) => a + x.total, 0));
-	const visibleTotal = $derived(visibleApps.reduce((a, x) => a + x.total, 0));
+	const visibleTotal = $derived(
+		!selectedApps.length || selectedApps.includes(TOTAL_KEY)
+			? installTotal30d
+			: visibleLines.reduce((a, x) => a + x.total, 0)
+	);
 
 	const grossSeries = $derived(data.series.map((p) => ({ period: p.period, value: p.gross })));
 	const netSeries = $derived(data.series.map((p) => ({ period: p.period, value: p.net })));
@@ -157,8 +179,9 @@
 		<Card.Header class="border-b px-5 py-4">
 			<Card.Title class="text-base">Daily installs</Card.Title>
 			<Card.Description>
-				New installs per app over the last 30 days — reinstalls count, closed stores don't.
-				Click an app below to focus its line; click again to bring the rest back.
+				New installs per app over the last 30 days, plus a Total line across every app.
+				Reinstalls count, closed stores don't. Click a chip below to focus its line; click
+				again to bring the rest back.
 			</Card.Description>
 			<Card.Action>
 				<span class="text-sm font-medium tabular-nums">
@@ -197,23 +220,20 @@
 					</LineChart>
 				</Chart.Container>
 				<div class="mt-3 flex flex-wrap gap-1.5">
-					{#each data.dailyInstalls.apps as app, i (app.slug)}
-						{@const active = !selectedApps.length || selectedApps.includes(app.slug)}
+					{#each installLegend as line (line.key)}
+						{@const active = !selectedApps.length || selectedApps.includes(line.key)}
 						<button
 							type="button"
-							onclick={() => toggleApp(app.slug)}
+							onclick={() => toggleApp(line.key)}
 							class="flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors
-								{selectedApps.includes(app.slug)
+								{selectedApps.includes(line.key)
 								? 'border-foreground/20 bg-muted font-medium'
 								: 'border-transparent text-muted-foreground hover:bg-muted/60'}
 								{active ? '' : 'opacity-40'}"
 						>
-							<span
-								class="size-2 rounded-full"
-								style="background: var(--chart-{(i % 8) + 1})"
-							></span>
-							{app.name}
-							<span class="tabular-nums">{app.total}</span>
+							<span class="size-2 rounded-full" style="background: {line.color}"></span>
+							{line.name}
+							<span class="tabular-nums">{line.total}</span>
 						</button>
 					{/each}
 				</div>
