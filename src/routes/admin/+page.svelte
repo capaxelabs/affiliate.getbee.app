@@ -318,7 +318,9 @@
 												</div>
 											{/if}
 											<div>
-												<p class="font-medium">{app.name}</p>
+												<a href="/admin/apps/{app.appId}" class="font-medium hover:underline">
+													{app.name}
+												</a>
 												{#if app.status !== 'active'}
 													<span class="text-xs text-muted-foreground">Paused</span>
 												{/if}

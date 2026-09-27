@@ -150,6 +150,7 @@ Three roles, one login (email magic-code):
       all combinable and reflected in the URL
 - [x] Filter options come from the app's own merchants, so none returns nothing
 - [x] Staff outside an app's scope get a 404, not a 403
+- [x] App names in the Overview's Revenue by app table link to the app detail page
 
 ## Blocking real use
 
