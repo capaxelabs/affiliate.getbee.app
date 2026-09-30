@@ -8,7 +8,6 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
-	import { Checkbox } from '$lib/components/ui/checkbox';
 	import PageHeader from '$lib/components/page-header.svelte';
 	import EmptyState from '$lib/components/empty-state.svelte';
 	import StatusBadge from '$lib/components/status-badge.svelte';
@@ -29,8 +28,6 @@
 	let open = $state(false);
 	let editing = $state<AppRow | null>(null);
 	let status = $state('active');
-	let welcomeEmail = $state(false);
-	let offboardEmail = $state(false);
 	let partnerAccountId = $state('');
 
 	// Only ever held in memory, never in the page data.
@@ -48,8 +45,6 @@
 	function openCreate() {
 		editing = null;
 		status = 'active';
-		welcomeEmail = false;
-		offboardEmail = false;
 		partnerAccountId = data.accounts[0]?.id ?? '';
 		open = true;
 	}
@@ -57,8 +52,6 @@
 	function openEdit(app: AppRow) {
 		editing = app;
 		status = app.status;
-		welcomeEmail = app.welcomeEmailEnabled;
-		offboardEmail = app.offboardEmailEnabled;
 		partnerAccountId = app.partnerAccountId ?? '';
 		open = true;
 	}
@@ -131,23 +124,6 @@
 </PageHeader>
 
 <div class="space-y-5 px-5 pb-10 sm:px-8">
-	{#if data.emailStats.welcome.pending + data.emailStats.offboard.pending > 0 || data.emailStats.welcome.sent + data.emailStats.offboard.sent > 0}
-		<div class="flex flex-wrap gap-x-6 gap-y-1 rounded-lg border bg-background px-4 py-3 text-sm">
-			<span class="font-medium">Lifecycle email</span>
-			<span class="text-muted-foreground">
-				Welcome: {data.emailStats.welcome.sent} sent · {data.emailStats.welcome.pending} queued
-			</span>
-			<span class="text-muted-foreground">
-				Offboarding: {data.emailStats.offboard.sent} sent · {data.emailStats.offboard.pending} queued
-			</span>
-			{#if data.emailStats.welcome.failed + data.emailStats.offboard.failed > 0}
-				<span class="text-destructive">
-					{data.emailStats.welcome.failed + data.emailStats.offboard.failed} failed
-				</span>
-			{/if}
-		</div>
-	{/if}
-
 	{#if data.canWrite}
 		<div class="rounded-lg border bg-background px-4 py-3">
 			<div class="flex flex-wrap items-center gap-3">
@@ -470,50 +446,6 @@
 						<Select.Item value="paused" label="Paused">Paused</Select.Item>
 					</Select.Content>
 				</Select.Root>
-			</div>
-
-			<div class="space-y-3 rounded-lg border p-4">
-				<div>
-					<p class="text-sm font-medium">Merchant lifecycle email</p>
-					<p class="text-xs text-muted-foreground">
-						Sent from this program to merchants of this app. Both are off until you turn them on.
-					</p>
-				</div>
-
-				<div class="space-y-2">
-					<Label for="supportEmail">Reply-to address</Label>
-					<Input
-						id="supportEmail"
-						name="supportEmail"
-						type="email"
-						value={editing?.supportEmail ?? ''}
-						placeholder="support@getbee.app"
-					/>
-				</div>
-
-				<!-- Hidden inputs carry the value; an empty string parses back to false. -->
-				<input type="hidden" name="welcomeEmailEnabled" value={welcomeEmail ? 'true' : ''} />
-				<input type="hidden" name="offboardEmailEnabled" value={offboardEmail ? 'true' : ''} />
-
-				<label class="flex items-start gap-2.5 text-sm">
-					<Checkbox bind:checked={welcomeEmail} />
-					<span>
-						Welcome email on install
-						<span class="block text-xs text-muted-foreground">
-							Sent 15 minutes after install, only when we have the merchant's email.
-						</span>
-					</span>
-				</label>
-
-				<label class="flex items-start gap-2.5 text-sm">
-					<Checkbox bind:checked={offboardEmail} />
-					<span>
-						Offboarding email on uninstall
-						<span class="block text-xs text-muted-foreground">
-							Sent an hour after uninstall, asking what went wrong. Cancelled if they reinstall.
-						</span>
-					</span>
-				</label>
 			</div>
 
 			{#if form?.error}

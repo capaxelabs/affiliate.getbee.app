@@ -22,8 +22,8 @@
 	"workers_dev": true,
 	"preview_urls": true,
 	"triggers": {
-		// 03:00 UTC: full Partner API sync. Hourly: lifecycle email outbox only.
-		"crons": ["0 3 * * *", "0 * * * *"]
+		// 03:00 UTC: full Partner API sync.
+		"crons": ["0 3 * * *"]
 	},
 	"d1_databases": [
 		{

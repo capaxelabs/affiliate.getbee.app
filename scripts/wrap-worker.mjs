@@ -50,9 +50,9 @@ export default {
 	fetch: worker.fetch,
 
 	async scheduled(event, env, ctx) {
-		// Daily pulls the Partner API; hourly only drains the merchant lifecycle
-		// outbox, so a welcome email is not a day late.
-		const task = event.cron === '0 3 * * *' ? 'all' : 'lifecycle';
+		// One daily run: the full Partner API sync. Merchant lifecycle email
+		// moved to Raechly, so the hourly outbox drain is gone.
+		const task = 'all';
 		ctx.waitUntil(runCron(env, ctx, task));
 	}
 };

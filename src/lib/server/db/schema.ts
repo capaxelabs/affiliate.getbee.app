@@ -145,15 +145,6 @@ export const apps = sqliteTable(
 		status: text('status', { enum: ['active', 'paused'] })
 			.notNull()
 			.default('active'),
-		/** Where merchants should reply. Also the from-name on lifecycle email. */
-		supportEmail: text('support_email'),
-		/** Merchant lifecycle email, off until someone turns it on per app. */
-		welcomeEmailEnabled: integer('welcome_email_enabled', { mode: 'boolean' })
-			.notNull()
-			.default(false),
-		offboardEmailEnabled: integer('offboard_email_enabled', { mode: 'boolean' })
-			.notNull()
-			.default(false),
 		/**
 		 * How far the relationship-event sync has read for this app. Per app, not
 		 * per account: an app linked after the account's first sync used to inherit
@@ -402,43 +393,6 @@ export const transactions = sqliteTable(
 );
 
 /* -------------------------------------------------------- lifecycle email */
-
-/**
- * Outbox for merchant lifecycle mail. A row per (install, kind) keeps sending
- * idempotent even if an install webhook is delivered twice.
- */
-export const lifecycleEmails = sqliteTable(
-	'lifecycle_emails',
-	{
-		id: text('id')
-			.primaryKey()
-			.$defaultFn(() => newId('lce')),
-		installId: text('install_id')
-			.notNull()
-			.references(() => installs.id, { onDelete: 'cascade' }),
-		appId: text('app_id')
-			.notNull()
-			.references(() => apps.id, { onDelete: 'cascade' }),
-		merchantId: text('merchant_id')
-			.notNull()
-			.references(() => merchants.id, { onDelete: 'cascade' }),
-		kind: text('kind', { enum: ['welcome', 'offboard'] }).notNull(),
-		toEmail: text('to_email').notNull(),
-		status: text('status', { enum: ['pending', 'sent', 'failed', 'skipped'] })
-			.notNull()
-			.default('pending'),
-		/** Held until this time so welcome mail doesn't land mid-install. */
-		sendAfter: integer('send_after', { mode: 'timestamp' }).notNull().default(now),
-		attempts: integer('attempts').notNull().default(0),
-		sentAt: integer('sent_at', { mode: 'timestamp' }),
-		error: text('error'),
-		...timestamps
-	},
-	(t) => [
-		uniqueIndex('lifecycle_emails_install_kind_idx').on(t.installId, t.kind),
-		index('lifecycle_emails_status_idx').on(t.status, t.sendAfter)
-	]
-);
 
 /* -------------------------------------------------------------- affiliates */
 
@@ -801,8 +755,7 @@ export const merchantsRelations = relations(merchants, ({ many }) => ({
 export const installsRelations = relations(installs, ({ one, many }) => ({
 	app: one(apps, { fields: [installs.appId], references: [apps.id] }),
 	merchant: one(merchants, { fields: [installs.merchantId], references: [merchants.id] }),
-	events: many(installEvents),
-	lifecycleEmails: many(lifecycleEmails)
+	events: many(installEvents)
 }));
 
 export const appChargesRelations = relations(appCharges, ({ one }) => ({
@@ -819,12 +772,6 @@ export const installEventsRelations = relations(installEvents, ({ one }) => ({
 export const transactionsRelations = relations(transactions, ({ one }) => ({
 	app: one(apps, { fields: [transactions.appId], references: [apps.id] }),
 	merchant: one(merchants, { fields: [transactions.merchantId], references: [merchants.id] })
-}));
-
-export const lifecycleEmailsRelations = relations(lifecycleEmails, ({ one }) => ({
-	install: one(installs, { fields: [lifecycleEmails.installId], references: [installs.id] }),
-	app: one(apps, { fields: [lifecycleEmails.appId], references: [apps.id] }),
-	merchant: one(merchants, { fields: [lifecycleEmails.merchantId], references: [merchants.id] })
 }));
 
 export const referralsRelations = relations(referrals, ({ one, many }) => ({
@@ -883,7 +830,6 @@ export type InstallEvent = typeof installEvents.$inferSelect;
 export type AppCharge = typeof appCharges.$inferSelect;
 export type InternalShop = typeof internalShops.$inferSelect;
 export type Transaction = typeof transactions.$inferSelect;
-export type LifecycleEmail = typeof lifecycleEmails.$inferSelect;
 export type PartnerAccount = typeof partnerAccounts.$inferSelect;
 export type AdminScope = typeof adminScopes.$inferSelect;
 export type Payout = typeof payouts.$inferSelect;

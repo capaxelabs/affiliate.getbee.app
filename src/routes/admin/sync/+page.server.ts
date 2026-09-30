@@ -3,14 +3,13 @@ import { desc, eq } from 'drizzle-orm';
 import { requireOwner } from '$lib/server/scope';
 import { apps, partnerAccounts, partnerSyncRuns } from '$lib/server/db/schema';
 import { runFullSync, syncableAccounts, syncInstalls, syncTransactions } from '$lib/server/services/sync';
-import { lifecycleEmailStats, processLifecycleEmails } from '$lib/server/services/lifecycle';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async (event) => {
 	await requireOwner(event);
 	const db = event.locals.db;
 
-	const [runs, accounts, allApps, emailStats] = await Promise.all([
+	const [runs, accounts, allApps] = await Promise.all([
 		db
 			.select({
 				run: partnerSyncRuns,
@@ -24,8 +23,7 @@ export const load: PageServerLoad = async (event) => {
 		db
 			.select({ id: apps.id, name: apps.name, partnerAppId: apps.partnerAppId, partnerAccountId: apps.partnerAccountId })
 			.from(apps)
-			.orderBy(apps.name),
-		lifecycleEmailStats(db)
+			.orderBy(apps.name)
 	]);
 
 	const syncable = await syncableAccounts(db);
@@ -42,7 +40,6 @@ export const load: PageServerLoad = async (event) => {
 			lastSyncError: a.lastSyncError,
 			appCount: allApps.filter((app) => app.partnerAccountId === a.id).length
 		})),
-		emailStats,
 		syncableCount: syncable.length,
 		untracked: allApps.filter((a) => !a.partnerAppId || !a.partnerAccountId).length
 	};
@@ -147,17 +144,6 @@ export const actions: Actions = {
 			message: failed.length
 				? `${failed.length} of ${result.accounts * 2} runs failed. Check the history below.`
 				: `Synced ${result.accounts} account(s), created ${created} commissions, cleared ${result.released}.`
-		};
-	},
-
-	lifecycle: async (event) => {
-		await requireOwner(event);
-		const result = await processLifecycleEmails(event.locals.db, event.platform!.env);
-		return {
-			success: true,
-			message: result.considered
-				? `${result.sent} sent, ${result.skipped} skipped, ${result.failed} failed.`
-				: 'Nothing was due to send.'
 		};
 	}
 };

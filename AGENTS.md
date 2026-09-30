@@ -49,14 +49,13 @@ src/lib/server/
   auth.ts              magic-code login, sessions
   scope.ts             admin/staff access resolution and app scoping
   crypto.ts            AES-GCM for Partner Access Tokens stored in D1
-  email.ts             transactional email via tools.capaxe.com/email
+  email.ts             account email (login codes, approvals, claims, payouts) via tools.capaxe.com/email
   guards.ts            requireUser / requireAdmin / requireAffiliate
   db/schema.ts         every table
   services/
     commission.ts      rate resolution, commission lines, hold window
     referral.ts        shop normalisation, attribution
     merchant.ts        merchant upsert, install/uninstall lifecycle
-    lifecycle.ts       welcome / offboarding email outbox
     partner-api.ts     Shopify Partner API GraphQL client
     sync.ts            transaction + install sync, matcher
     stats.ts           dashboard, revenue and report queries
@@ -65,7 +64,7 @@ src/routes/
   r/[code]/[app]       affiliate link → click record → App Store listing
   api/track/install    HMAC-signed install ingest from each Bee app
   api/track/uninstall  HMAC-signed uninstall + churn feedback ingest
-  api/cron/sync        bearer-guarded Partner API sync + lifecycle outbox
+  api/cron/sync        bearer-guarded Partner API sync
   app/                 affiliate portal
   admin/               staff console (see access rules below)
 ```
@@ -88,9 +87,9 @@ src/routes/
   shop; commissions are derived from it. Dashboard revenue reads `transactions`.
 - **`merchants` is every shop, referred or not.** `installs` is one row per
   (app, merchant) and survives uninstall so churn stays visible.
-- Lifecycle email is an **outbox**, not a direct send. Queue on install/uninstall,
-  drain on cron. The toggle and the install state are re-checked at send time, so
-  a merchant who uninstalls before the welcome goes out never receives it.
+- **No merchant email here.** This app is for affiliates and analytics. Merchant
+  welcome and churn-survey email are journeys in Raechly, started by install and
+  uninstall events. Only account email (login, approvals, claims, payouts) stays.
 
 ## Access control
 
@@ -224,9 +223,10 @@ with the ingest key. Install carries an optional `shop` object (name, email, own
 country, currency, plan) — without an email we can record the merchant but cannot
 mail them.
 
-Welcome and offboarding email are **off per app** until switched on in
-`/admin/apps`. Both are queued into `lifecycle_emails` with a delay (welcome +15m,
-offboarding +1h) and sent when the cron endpoint drains the outbox.
+Merchant email is not sent from here. It moved to Raechly journeys (2026-09-29):
+the `lifecycle_emails` outbox, the per-app toggles and the reply-to column were
+removed in migration 0014. Existing merchants and installs were imported into
+Raechly once, as history that starts no journey.
 
 ## Shipping
 
@@ -257,7 +257,7 @@ the deploy.
 
 ## Scheduling
 
-Cron Triggers run `0 3 * * *` (full sync) and `0 * * * *` (lifecycle email only).
+Cron Triggers run `0 3 * * *` (full sync).
 
 adapter-cloudflare emits only `fetch`, and its `index.js` sets
 `worker_dest = wrangler_config.main` — it writes its bundle **to** `main`, so a
@@ -270,7 +270,7 @@ build. Both files are gitignored build artifacts — edit the generator, not the
 The endpoint is also reachable directly:
 
 ```
-POST /api/cron/sync[?task=lifecycle]   Authorization: Bearer $INGEST_KEY
+POST /api/cron/sync   Authorization: Bearer $INGEST_KEY
 ```
 
 
@@ -294,7 +294,7 @@ delete them.
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **affiliate.getbee.app** (1118 symbols, 2318 relationships, 75 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **affiliate.getbee.app** (1113 symbols, 2292 relationships, 74 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > Index stale? Run `node .gitnexus/run.cjs analyze` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? `npx gitnexus analyze` (npm 11 crash → `npm i -g gitnexus`; #1939).
 

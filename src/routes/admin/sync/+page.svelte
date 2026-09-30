@@ -9,7 +9,6 @@
 	import StatusBadge from '$lib/components/status-badge.svelte';
 	import RefreshIcon from '@lucide/svelte/icons/refresh-cw';
 	import LoaderIcon from '@lucide/svelte/icons/loader-circle';
-	import MailIcon from '@lucide/svelte/icons/mail';
 	import PlugIcon from '@lucide/svelte/icons/plug';
 	import { relativeTime } from '$lib/format';
 	import type { ActionData, PageData } from './$types';
@@ -191,28 +190,6 @@
 				</ul>
 			{/if}
 		</Card.Content>
-	</Card.Root>
-
-	<Card.Root>
-		<Card.Header>
-			<Card.Title class="text-base">Merchant lifecycle email</Card.Title>
-			<Card.Description>
-				Welcome {data.emailStats.welcome.sent} sent / {data.emailStats.welcome.pending} queued ·
-				Offboarding {data.emailStats.offboard.sent} sent / {data.emailStats.offboard.pending} queued
-			</Card.Description>
-		</Card.Header>
-		<Card.Footer class="border-t pt-5">
-			<form method="POST" action="?/lifecycle" use:enhance={run('lifecycle')}>
-				<Button type="submit" variant="outline" disabled={running !== null}>
-					{#if running === 'lifecycle'}
-						<LoaderIcon class="size-4 animate-spin" />
-					{:else}
-						<MailIcon class="size-4" />
-					{/if}
-					Send queued email
-				</Button>
-			</form>
-		</Card.Footer>
 	</Card.Root>
 
 	<Card.Root class="gap-0 overflow-hidden p-0">

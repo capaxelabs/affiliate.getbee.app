@@ -1,6 +1,5 @@
 import { json } from '@sveltejs/kit';
 import { runFullSync } from '$lib/server/services/sync';
-import { processLifecycleEmails } from '$lib/server/services/lifecycle';
 import { pruneLoginCodes } from '$lib/server/auth';
 import { getIngestKey } from '$lib/server/services/ingest-key';
 import type { RequestHandler } from './$types';
@@ -15,10 +14,11 @@ import type { RequestHandler } from './$types';
  * The bearer is the ingest key from /admin/apps, the same one apps sign their
  * webhooks with. CRON_SECRET still works so an existing scheduler keeps running.
  *
- * Cron Triggers reach it through worker.js. `?task=lifecycle` skips the Partner
- * API and only sends queued merchant email.
+ * Cron Triggers reach it through worker.js. Merchant lifecycle email moved to
+ * Raechly (journeys driven by install events), so there is one task: the full
+ * Partner API sync.
  */
-export const POST: RequestHandler = async ({ request, url, locals, platform }) => {
+export const POST: RequestHandler = async ({ request, locals, platform }) => {
 	const accepted = [
 		await getIngestKey(locals.db),
 		platform?.env?.CRON_SECRET
@@ -30,25 +30,12 @@ export const POST: RequestHandler = async ({ request, url, locals, platform }) =
 		return json({ error: 'Unauthorized' }, { status: 401 });
 	}
 
-	// `task=lifecycle` only drains the outbox. The hourly trigger uses it so a
-	// welcome email is not delayed by a day, without hitting the Partner API
-	// twenty-four times over.
-	const task = url.searchParams.get('task') === 'lifecycle' ? 'lifecycle' : 'all';
-
-	if (task === 'lifecycle') {
-		const lifecycle = await processLifecycleEmails(locals.db, platform!.env);
-		return json({ task, lifecycle });
-	}
-
+	const task = 'all';
 	const result = await runFullSync(locals.db, platform!.env, 'cron');
-
-	// Drain the outbox regardless of how the sync went — the queue is filled by
-	// install webhooks, not by the Partner API.
-	const lifecycle = await processLifecycleEmails(locals.db, platform!.env);
 	await pruneLoginCodes(locals.db);
 
 	const failed = [...result.apps, ...result.installs, ...result.transactions].some(
 		(r) => r.status === 'failed'
 	);
-	return json({ task, ...result, lifecycle }, { status: failed ? 502 : 200 });
+	return json({ task, ...result }, { status: failed ? 502 : 200 });
 };

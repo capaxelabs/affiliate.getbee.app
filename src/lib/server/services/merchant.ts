@@ -3,7 +3,6 @@ import type { DrizzleClient } from '$lib/server/db';
 import { apps, installEvents, installs, merchants } from '$lib/server/db/schema';
 import { normalizeShopDomain } from './referral';
 import { isInternalShop } from './internal-shops';
-import { queueLifecycleEmail } from './lifecycle';
 
 export type MerchantProfile = {
 	shopDomain: string;
@@ -310,28 +309,12 @@ export async function recordInstall(
 		metadata: { plan: options.plan ?? null }
 	  });
 
-	// Only queue a welcome for a genuinely new install we have not seen before.
-	if (recorded && (firstInstall || wasUninstalled)) {
-		const [app] = await db.select().from(apps).where(eq(apps.id, options.appId)).limit(1);
-		if (app?.welcomeEmailEnabled && merchant.email) {
-			await queueLifecycleEmail(db, {
-				installId,
-				appId: options.appId,
-				merchantId: merchant.id,
-				kind: 'welcome',
-				toEmail: merchant.email,
-				// A short hold keeps the welcome from landing before the app finishes setting up.
-				sendAfter: new Date(installedAt.getTime() + 15 * 60 * 1000)
-			});
-		}
-	}
-
 	const reinstall = wasUninstalled;
 
 	return { merchantId: merchant.id, installId, firstInstall, reinstall };
 }
 
-/** Records an uninstall and queues the offboarding email when enabled. */
+/** Records an uninstall. */
 export async function recordUninstall(
 	db: DrizzleClient,
 	options: {
@@ -421,21 +404,6 @@ export async function recordUninstall(
 			source,
 			metadata: { reason: options.reason ?? null, feedback: options.feedback }
 		});
-	}
-
-	if (recorded && !alreadyUninstalled) {
-		const [app] = await db.select().from(apps).where(eq(apps.id, options.appId)).limit(1);
-		if (app?.offboardEmailEnabled && row.merchant.email) {
-			await queueLifecycleEmail(db, {
-				installId: row.install.id,
-				appId: options.appId,
-				merchantId: row.merchant.id,
-				kind: 'offboard',
-				toEmail: row.merchant.email,
-				// Give them a beat before asking what went wrong.
-				sendAfter: new Date(uninstalledAt.getTime() + 60 * 60 * 1000)
-			});
-		}
 	}
 
 	return { installId: row.install.id, merchantId: row.merchant.id, alreadyUninstalled };

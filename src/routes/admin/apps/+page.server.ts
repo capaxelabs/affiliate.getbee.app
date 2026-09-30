@@ -7,14 +7,13 @@ import { revenueByApp } from '$lib/server/services/stats';
 import { syncApps, syncableAccounts } from '$lib/server/services/sync';
 import { getIngestKey, ingestKeyHint, rotateIngestKey } from '$lib/server/services/ingest-key';
 import { fetchListing, findListing } from '$lib/server/services/listing';
-import { lifecycleEmailStats } from '$lib/server/services/lifecycle';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async (event) => {
 	const scope = await requireAdminAccess(event);
 	const appFilter = appScopeFilter(scope, apps.id);
 
-	const [rows, revenue, emailStats, accounts] = await Promise.all([
+	const [rows, revenue, accounts] = await Promise.all([
 		event.locals.db
 			.select({
 				app: apps,
@@ -24,7 +23,6 @@ export const load: PageServerLoad = async (event) => {
 			.where(appFilter)
 			.orderBy(apps.name),
 		revenueByApp(event.locals.db, scope.appIds),
-		lifecycleEmailStats(event.locals.db),
 		event.locals.db
 			.select({ id: partnerAccounts.id, name: partnerAccounts.name })
 			.from(partnerAccounts)
@@ -51,7 +49,6 @@ export const load: PageServerLoad = async (event) => {
 				churnedInstalls: stats?.churnedInstalls ?? 0
 			};
 		}),
-		emailStats,
 		accounts,
 		canWrite: scope.canWrite
 	};
@@ -78,11 +75,7 @@ const appSchema = z.object({
 	commissionPercent: z.coerce.number().min(0, 'Rate cannot be negative.').max(100, 'Rate cannot exceed 100%.'),
 	commissionMonths: z.coerce.number().int().min(0).max(120).optional(),
 	cookieDays: z.coerce.number().int().min(1).max(365),
-	status: z.enum(['active', 'paused']),
-	supportEmail: z.string().trim().email('Support email must be a valid address.').optional().or(z.literal('')),
-	// The form posts 'true' or an empty string.
-	welcomeEmailEnabled: z.string().optional(),
-	offboardEmailEnabled: z.string().optional()
+	status: z.enum(['active', 'paused'])
 });
 
 function toValues(input: z.infer<typeof appSchema>) {
@@ -96,10 +89,7 @@ function toValues(input: z.infer<typeof appSchema>) {
 		commissionBps: Math.round(input.commissionPercent * 100),
 		commissionMonths: input.commissionMonths ? input.commissionMonths : null,
 		cookieDays: input.cookieDays,
-		status: input.status,
-		supportEmail: input.supportEmail || null,
-		welcomeEmailEnabled: input.welcomeEmailEnabled === 'true',
-		offboardEmailEnabled: input.offboardEmailEnabled === 'true'
+		status: input.status
 	};
 }
 

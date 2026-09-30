@@ -17,7 +17,7 @@ import type { RequestHandler } from './$types';
  *
  * Two jobs in one call:
  *   1. Record the merchant and the install — always, referred or not. This is
- *      what the merchant list, lifecycle email and churn numbers run on.
+ *      what the merchant list and churn numbers run on.
  *   2. Attribute the shop to an affiliate when a ref code came through.
  *
  * Signed with HMAC-SHA256 over the raw body using CRON_SECRET.
