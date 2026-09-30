@@ -163,6 +163,52 @@ record a survey answer that arrives after the uninstall.
 
 ---
 
+## POST /api/track/shop
+
+Call from your `shop/update` webhook handler. Shopify fires it when a store
+changes hands, renames, changes plan or updates its contact email. The Partner
+API carries none of that, so without this call a transferred store keeps its
+old owner's email here until the next reinstall.
+
+Same identity block as the other two endpoints. Only the fields inside `shop`
+that you send are overwritten, so a partial payload never blanks a value.
+
+| Field | Required | Notes |
+| --- | --- | --- |
+| `app` | yes | Same handle as the install |
+| `shopDomain` | yes | |
+| `apiKey` | recommended | Your `SHOPIFY_API_KEY` |
+| `partnerAppId` | optional | `gid://partners/App/…` |
+| `shop` | yes | Same shape as on install: `name`, `email`, `ownerName`, `phone`, `primaryDomain`, `country`, `currency`, `timezone`, `plan`, all optional |
+
+```bash
+BODY='{
+  "app": "rankflo",
+  "shopDomain": "acme.myshopify.com",
+  "shop": { "name": "Acme", "email": "new-owner@acme.com", "ownerName": "Grace Hopper" }
+}'
+
+curl -sS -X POST https://affiliates.getbee.app/api/track/shop \
+  -H 'content-type: application/json' \
+  -H "x-bee-signature: $(printf '%s' "$BODY" | openssl dgst -sha256 -hmac "$AFFILIATES_SECRET" -hex | sed 's/.*= //')" \
+  -d "$BODY"
+```
+
+```json
+{ "recorded": true, "merchantId": "mer_…", "email": "new-owner@acme.com" }
+```
+
+`{ "recorded": false, "reason": "no_merchant_on_record" }` means the shop was
+never reported as installed, so there is nothing to update. A `200`, not an
+error. `internal_shop` means the address matched a Shopify reviewer account and
+was ignored.
+
+The webhook payload maps straight across: `name`, `email`, `shop_owner` →
+`ownerName`, `phone`, `domain` → `primaryDomain`, `country_code` → `country`,
+`currency`, `iana_timezone` → `timezone`, `plan_name` → `plan`.
+
+---
+
 ## Apps with no paid customers
 
 App discovery reads the Partner API's billing transactions, because there is no
@@ -343,6 +389,24 @@ export function reportInstall(store: Store, ref?: string | null) {
 /** Call from the app/uninstalled webhook. */
 export function reportUninstall(shopDomain: string, reason?: string, feedback?: string) {
 	return report('/api/track/uninstall', { shopDomain, reason, feedback });
+}
+
+/** Call from the shop/update webhook with Shopify's payload. */
+export function reportShopUpdate(shopDomain: string, shop: Record<string, unknown>) {
+	return report('/api/track/shop', {
+		shopDomain,
+		shop: {
+			name: shop.name ?? null,
+			email: shop.email ?? null,
+			ownerName: shop.shop_owner ?? null,
+			phone: shop.phone ?? null,
+			primaryDomain: shop.domain ?? null,
+			country: shop.country_code ?? null,
+			currency: shop.currency ?? null,
+			timezone: shop.iana_timezone ?? null,
+			plan: shop.plan_name ?? null
+		}
+	});
 }
 ```
 

@@ -76,7 +76,19 @@ Three roles, one login (email magic-code):
 - [x] Admin overview: gross / net / this month / MoM, revenue-by-app table
 - [x] Apps page: installs, churn, this month and gross per app
 
-## Merchant lifecycle email
+## Merchant lifecycle email (moved to Raechly, 2026-09-29)
+
+Removed from this app: outbox, templates, per-app toggles, reply-to column, hourly
+cron. Migration `0014` drops them. Journeys in Raechly send these now.
+
+- [ ] Run the one-time import before applying `0014` remotely (it reads
+      `apps.support_email`): `node scripts/migrate-bee-merchants.mjs` in the
+      raechly.com repo, dry run first.
+- [ ] `npm run db:migrate:remote`, then `npm run deploy`.
+- [ ] Decide how install and uninstall events reach Raechly from now on: each Bee
+      app posts to Raechly directly, or this app forwards them.
+
+History of the removed feature:
 
 - [x] `lifecycle_emails` outbox, unique per (install, kind)
 - [x] Welcome on install (+15m) and offboarding/churn-survey on uninstall (+1h)
@@ -127,12 +139,15 @@ Three roles, one login (email magic-code):
       with `X-Bee-Signature` HMAC-SHA256 of the raw body using the ingest key
       from Admin → Apps, set in the app as `AFFILIATES_SECRET`.
 - [x] On `app/uninstalled`, POST to `/api/track/uninstall`.
+- [x] On `shop/update`, POST to `/api/track/shop` so a transferred store picks
+      up its new owner's email. Done in Bee Subscriptions; the other apps still
+      need the webhook subscription and the call.
 - [ ] POST again later with `reason` / `feedback` when a merchant replies to the
       offboarding survey — nothing sends that survey yet, see below.
 
 ## Ingest key
 
-- [x] One key for every app and both track endpoints, stored encrypted in
+- [x] One key for every app and every track endpoint, stored encrypted in
       `settings` so the admin can read it back — a worker secret cannot be
 - [x] Generate / reveal / regenerate from Admin → Apps, owner-only and audited
 - [x] `/api/cron/sync` accepts it as a bearer token
@@ -159,9 +174,8 @@ Three roles, one login (email magic-code):
 - [x] Affiliate turned on for RankFlo and Shootflo Studio
 - [x] Reporter live in all 8 apps — 124 install records, 116 with a contactable
       merchant
-- [ ] Turn welcome / offboarding email on per app in Admin → Apps. Both toggles
-      are off for every app, so `lifecycle_emails` has never queued a row and no
-      merchant has been mailed.
+- [x] ~~Turn welcome / offboarding email on per app~~ Moved to Raechly journeys;
+      no merchant was ever mailed from here.
 - [ ] Recruit the first affiliate. The only account is the admin, whose own
       affiliate record still sits on `pending`; 0 referrals and 0 commissions, so
       the attribution path has never run end to end in production.
