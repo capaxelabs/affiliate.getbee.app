@@ -5,6 +5,7 @@ import { requireAffiliate } from '$lib/server/guards';
 import { apps, referralClaims, referrals } from '$lib/server/db/schema';
 import { normalizeShopDomain } from '$lib/server/services/referral';
 import type { Actions, PageServerLoad } from './$types';
+import { notify } from '$lib/server/services/notifications';
 
 export const load: PageServerLoad = async (event) => {
 	const user = requireAffiliate(event);
@@ -91,7 +92,7 @@ export const actions: Actions = {
 		}
 
 		const [app] = await event.locals.db
-			.select({ id: apps.id })
+			.select({ id: apps.id, name: apps.name })
 			.from(apps)
 			.where(
 				and(
@@ -134,12 +135,21 @@ export const actions: Actions = {
 			return fail(409, { error: 'There is already a pending claim for this shop.' });
 		}
 
-		await event.locals.db.insert(referralClaims).values({
-			affiliateId: user.affiliateId,
-			appId: app.id,
-			shopDomain,
-			referralDate,
-			note: parsed.data.note || null
+		const [claim] = await event.locals.db
+			.insert(referralClaims)
+			.values({
+				affiliateId: user.affiliateId,
+				appId: app.id,
+				shopDomain,
+				referralDate,
+				note: parsed.data.note || null
+			})
+			.returning({ id: referralClaims.id });
+
+		await notify(event.locals.db, {
+			key: `claim:${claim.id}`,
+			topic: 'affiliates',
+			text: `:inbox_tray: *${app.name}*: ${user.email} claimed ${shopDomain}. Review it in Claims.`
 		});
 
 		return { success: true, message: `Claim submitted for ${shopDomain}.` };

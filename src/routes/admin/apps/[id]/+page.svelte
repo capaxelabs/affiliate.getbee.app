@@ -11,6 +11,7 @@
 	import StatCard from '$lib/components/stat-card.svelte';
 	import StatusBadge from '$lib/components/status-badge.svelte';
 	import ReportCard from '$lib/components/report-card.svelte';
+	import MrrChart from '$lib/components/mrr-chart.svelte';
 	import Pagination from '$lib/components/pagination.svelte';
 	import EmptyState from '$lib/components/empty-state.svelte';
 	import ArrowLeftIcon from '@lucide/svelte/icons/arrow-left';
@@ -19,6 +20,7 @@
 	import StoreIcon from '@lucide/svelte/icons/store';
 	import UploadIcon from '@lucide/svelte/icons/upload';
 	import { INSTALL_STATUS_LABEL, money, shortDate, humanize, plural } from '$lib/format';
+	import { CHURN_REASON_LABEL } from '$lib/constants';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
@@ -71,6 +73,42 @@
 	const churnPoints = $derived(
 		data.lifecycleSeries.map((p) => ({ period: p.period, value: p.uninstalled }))
 	);
+
+	const sub = $derived(data.subscriptions);
+	const hasLedger = $derived(data.movement.some((p) => p.mrr !== 0 || p.net !== 0));
+	const trialsStarted = $derived(data.movement.reduce((a, p) => a + p.trialsStarted, 0));
+	const trialsConverted = $derived(data.movement.reduce((a, p) => a + p.trialsConverted, 0));
+
+	type FunnelKey =
+		| 'listingViews'
+		| 'addAppClicks'
+		| 'affiliateClicks'
+		| 'installs'
+		| 'activated'
+		| 'trialsStarted'
+		| 'newPaying';
+	const funnelSteps = $derived<{ key: FunnelKey; label: string; unit: string }[]>([
+		...(data.funnel.measured
+			? [
+					{ key: 'listingViews' as const, label: 'Listing views', unit: 'visitors' },
+					{ key: 'addAppClicks' as const, label: 'Add app clicks', unit: 'visitors' }
+				]
+			: []),
+		...(data.canViewAffiliates
+			? [{ key: 'affiliateClicks' as const, label: 'Affiliate link clicks', unit: 'clicks' }]
+			: []),
+		{ key: 'installs', label: 'Installs', unit: 'shops' },
+		...(data.app.activationEvent
+			? [{ key: 'activated' as const, label: 'Activated', unit: 'shops, within 14 days' }]
+			: []),
+		{ key: 'trialsStarted', label: 'Trials started', unit: 'shops' },
+		{ key: 'newPaying', label: 'New paying', unit: 'shops' }
+	]);
+	const monthShort = (period: string) =>
+		new Date(`${period}-01T00:00:00Z`).toLocaleDateString('en-US', { month: 'short', timeZone: 'UTC' });
+	/** Step-over-step rate. Affiliate clicks are a side channel, not a step. */
+	const rate = (num: number | null, den: number | null) =>
+		num === null || den === null || !den ? '' : `${Math.round((num / den) * 100)}%`;
 
 	const installsTotal = $derived(data.lifecycleSeries.reduce((sum, p) => sum + p.installed, 0));
 	const churnTotal = $derived(data.lifecycleSeries.reduce((sum, p) => sum + p.uninstalled, 0));
@@ -212,15 +250,89 @@
 		<ReportCard title="Uninstalls" total={String(churnTotal)} points={churnPoints} />
 	</div>
 
+	<Card.Root class="gap-0 p-0">
+		<Card.Header class="border-b px-5 py-4">
+			<Card.Title class="text-base">MRR</Card.Title>
+			<Card.Description>
+				{sub.payingShops} paying · {money(sub.arpuCents)} ARPU · {sub.trialShops} on trial worth
+				{money(sub.trialPipelineCents)}/mo · {trialsConverted} of {trialsStarted} trials converted in
+				12 months.
+				<a href="/admin/subscriptions?app={app.id}" class="underline">Open the subscription report</a>
+			</Card.Description>
+			<Card.Action>
+				<span class="text-sm font-medium tabular-nums">{money(sub.mrrCents)}/mo</span>
+			</Card.Action>
+		</Card.Header>
+		<Card.Content class="px-5 py-4">
+			{#if hasLedger}
+				<MrrChart points={data.movement} class="h-48" />
+			{:else}
+				<p class="py-10 text-center text-sm text-muted-foreground">
+					No paying subscriptions in the last 12 months.
+				</p>
+			{/if}
+		</Card.Content>
+	</Card.Root>
+
+	<Card.Root class="gap-0 overflow-hidden p-0">
+		<Card.Header class="border-b px-5 py-4">
+			<Card.Title class="text-base">Install funnel</Card.Title>
+			<Card.Description>
+				{#if data.funnel.measured}
+					Listing views and Add app clicks count visitors from GA4. The steps below count shops
+					from Shopify, so the rate between the two is a trend, not an exact conversion.
+				{:else}
+					From install to paying customer. Add this app's GA4 dataset on the
+					<a href="/admin/integrations" class="underline">Integrations</a> page to see listing
+					views and Add app clicks above it.
+				{/if}
+			</Card.Description>
+		</Card.Header>
+		<Card.Content class="p-0">
+			<div class="overflow-x-auto">
+				<Table.Root>
+					<Table.Header>
+						<Table.Row>
+							<Table.Head>Step</Table.Head>
+							{#each data.funnel.points as p (p.period)}
+								<Table.Head class="text-right">{monthShort(p.period)}</Table.Head>
+							{/each}
+						</Table.Row>
+					</Table.Header>
+					<Table.Body>
+						{#each funnelSteps as step, i (step.key)}
+							{@const prev = funnelSteps.slice(0, i).filter((s) => s.key !== 'affiliateClicks').at(-1)}
+							<Table.Row>
+								<Table.Cell>
+									<span class="font-medium">{step.label}</span>
+									<span class="block text-xs text-muted-foreground">{step.unit}</span>
+								</Table.Cell>
+								{#each data.funnel.points as p (p.period)}
+									{@const value = p[step.key]}
+									{@const ratio = step.key !== 'affiliateClicks' && prev ? rate(value, p[prev.key]) : ''}
+									<Table.Cell class="text-right tabular-nums">
+										{value ?? '—'}
+										{#if ratio}
+											<span class="block text-xs text-muted-foreground">{ratio}</span>
+										{/if}
+									</Table.Cell>
+								{/each}
+							</Table.Row>
+						{/each}
+					</Table.Body>
+				</Table.Root>
+			</div>
+		</Card.Content>
+	</Card.Root>
+
 	{#if data.charges.length}
 		<Card.Root class="gap-0 overflow-hidden p-0">
 			<Card.Header class="border-b px-5 py-4">
 				<Card.Title class="text-base">Charges</Card.Title>
 				<Card.Description>
-					Committed revenue. Shopify bills a subscription at the end of each 30-day cycle,
-					so a live plan shows no gross revenue until its first billing date. A date only
-					appears while it is still ahead — Shopify stamps it at activation and never
-					refreshes it, so a past one has already been billed.
+					Every charge Shopify reported, newest first. A trial shows when its first bill is due,
+					and a plan change shows on the charge it replaced. Gross revenue only moves once
+					Shopify pays the bill out.
 				</Card.Description>
 				{#if s.mrrCents}
 					<Card.Action>
@@ -236,6 +348,7 @@
 								<Table.Head>Shop</Table.Head>
 								<Table.Head>Plan</Table.Head>
 								<Table.Head class="text-right">Amount</Table.Head>
+								<Table.Head class="text-right">Per month</Table.Head>
 								<Table.Head>Status</Table.Head>
 								<Table.Head class="text-right">Bills on</Table.Head>
 							</Table.Row>
@@ -252,6 +365,14 @@
 									</Table.Cell>
 									<Table.Cell class="text-right tabular-nums">
 										{money(charge.amountCents, charge.currency)}
+										{#if charge.kind === 'recurring'}
+											<span class="block text-xs text-muted-foreground">
+												{charge.billingInterval === 'annual' ? 'yearly' : 'monthly'}
+											</span>
+										{/if}
+									</Table.Cell>
+									<Table.Cell class="text-right text-muted-foreground tabular-nums">
+										{charge.kind === 'recurring' ? money(charge.monthlyAmountCents, charge.currency) : '—'}
 									</Table.Cell>
 									<Table.Cell>
 										<StatusBadge
@@ -262,6 +383,20 @@
 													: 'churned'}
 											label={humanize(charge.status)}
 										/>
+										{#if charge.trialStatus === 'in_trial'}
+											<span class="mt-0.5 block text-xs text-amber-600">
+												On trial until {shortDate(charge.trialEndsAt)}
+											</span>
+										{:else if charge.trialStatus === 'converted'}
+											<span class="mt-0.5 block text-xs text-muted-foreground">Converted from trial</span>
+										{:else if charge.trialStatus === 'cancelled'}
+											<span class="mt-0.5 block text-xs text-muted-foreground">Cancelled in trial</span>
+										{/if}
+										{#if charge.churnReason && charge.churnReason !== 'cancelled'}
+											<span class="mt-0.5 block text-xs text-muted-foreground">
+												{CHURN_REASON_LABEL[charge.churnReason]}
+											</span>
+										{/if}
 									</Table.Cell>
 									<Table.Cell class="text-right text-muted-foreground tabular-nums">
 										{charge.status === 'active' && upcoming(charge.billingOn)

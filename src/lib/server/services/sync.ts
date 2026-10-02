@@ -1,12 +1,14 @@
-import { and, desc, eq, isNotNull, lt, sql } from 'drizzle-orm';
+import { and, desc, eq, isNotNull, isNull, lt, sql } from 'drizzle-orm';
 import type { DrizzleClient } from '$lib/server/db';
 import {
 	apps,
 	partnerAccounts,
 	partnerSyncRuns,
 	referrals,
+	settings,
 	transactions
 } from '$lib/server/db/schema';
+import { runBatch } from '$lib/server/db/batch';
 import { recordCommission, releaseMaturedCommissions } from './commission';
 import { normalizeShopDomain } from './referral';
 import { isInternalDomain, loadInternalShops } from './internal-shops';
@@ -22,11 +24,14 @@ import {
 	toCents,
 	type PartnerApp,
 	type PartnerCredentials,
+	type PartnerBillingEvent,
 	type PartnerChargeEvent,
 	type PartnerRelationshipEvent,
 	type PartnerTransaction
 } from './partner-api';
-import { applyChargeEvents } from './charges';
+import { applyBillingEvents, applyChargeEvents } from './charges';
+import { rebuildSubscriptions, refreshDueTrials, subscriptionShops } from './subscriptions';
+import { dispatchSubscriptionAlerts, notify } from './notifications';
 
 type Env = App.Platform['env'];
 type Account = typeof partnerAccounts.$inferSelect;
@@ -340,6 +345,8 @@ export async function syncTransactions(
 	let matched = 0;
 	let created = 0;
 	let cursor: string | null = null;
+	// A sale settling is what converts a trial and states a plan's cadence.
+	const touched = new Map<string, Set<string>>();
 
 	try {
 		const credentials = credentialsFor(account);
@@ -368,10 +375,17 @@ export async function syncTransactions(
 				const result = await applyTransaction(db, txn, appsByPartnerId);
 				if (result.matched) matched++;
 				if (result.commission) created++;
+				if (result.subscription) {
+					const shops = touched.get(result.subscription.appId) ?? new Set<string>();
+					shops.add(result.subscription.shopDomain);
+					touched.set(result.subscription.appId, shops);
+				}
 			}
 
 			if (!page.cursor) break;
 		}
+
+		for (const [appId, shops] of touched) await rebuildSubscriptions(db, appId, shops);
 
 		await finishRun(db, run.id, account.id, {
 			status: 'success',
@@ -420,6 +434,8 @@ type TransactionOutcome = {
 	matched: boolean;
 	/** A new commission line was written for an attributed shop. */
 	commission: boolean;
+	/** A subscription sale, whose shop's subscriptions need re-deriving. */
+	subscription?: { appId: string; shopDomain: string };
 };
 
 async function applyTransaction(
@@ -447,7 +463,8 @@ async function applyTransaction(
 		merchantId = merchant?.id ?? null;
 	}
 
-	// Store the raw revenue row first — this is what the dashboards read.
+	// Store the raw revenue row first — this is what the dashboards read. A
+	// re-read fills in the charge id on rows synced before we asked for it.
 	const stored = await db
 		.insert(transactions)
 		.values({
@@ -459,13 +476,26 @@ async function applyTransaction(
 			currency,
 			grossAmountCents,
 			netAmountCents,
+			partnerChargeId: txn.chargeId,
+			billingInterval: txn.billingInterval,
 			occurredAt
 		})
 		.onConflictDoNothing({ target: transactions.partnerTransactionId })
 		.returning();
 
 	const transaction = stored.at(0) ?? null;
+	if (!transaction && txn.chargeId) {
+		await db
+			.update(transactions)
+			.set({ partnerChargeId: txn.chargeId, billingInterval: txn.billingInterval })
+			.where(
+				and(eq(transactions.partnerTransactionId, txn.id), isNull(transactions.partnerChargeId))
+			);
+	}
 	if (!shopDomain) return { matched: true, commission: false };
+
+	const subscription =
+		chargeType === 'recurring' && txn.chargeId ? { appId: app.id, shopDomain } : undefined;
 
 	const [referral] = await db
 		.select()
@@ -474,11 +504,17 @@ async function applyTransaction(
 		.limit(1);
 
 	// Revenue is recorded either way; only an attributed shop earns a commission.
-	if (!referral || referral.status === 'rejected') return { matched: true, commission: false };
+	if (!referral || referral.status === 'rejected') {
+		return { matched: true, commission: false, subscription };
+	}
 
 	if (referral.commissionEndsAt && occurredAt > referral.commissionEndsAt) {
-		return { matched: true, commission: false };
+		return { matched: true, commission: false, subscription };
 	}
+
+	// A credit is money handed back to the merchant at our discretion, not a
+	// sale an affiliate earned on.
+	if (chargeType === 'credit') return { matched: true, commission: false, subscription };
 
 	const commission = await recordCommission(db, {
 		referralId: referral.id,
@@ -494,7 +530,7 @@ async function applyTransaction(
 		occurredAt
 	});
 
-	return { matched: true, commission: Boolean(commission) };
+	return { matched: true, commission: Boolean(commission), subscription };
 }
 
 /** How far a first-time backfill of an app's relationship events reaches back. */
@@ -584,6 +620,7 @@ export async function syncInstalls(
 			// wrong state.
 			const collected: PartnerRelationshipEvent[] = [];
 			const chargeEvents: PartnerChargeEvent[] = [];
+			const billingEvents: PartnerBillingEvent[] = [];
 			let cursor: string | null = null;
 			let hasNextPage = true;
 
@@ -596,6 +633,7 @@ export async function syncInstalls(
 				cursor = page.cursor;
 				collected.push(...page.relationships);
 				chargeEvents.push(...page.charges);
+				billingEvents.push(...page.billing);
 				if (!page.cursor) break;
 			}
 
@@ -698,6 +736,19 @@ export async function syncInstalls(
 			});
 			matched += charges.written;
 
+			await applyBillingEvents(db, {
+				appId: app.id,
+				appName: app.name,
+				events: billingEvents,
+				knownInternal,
+				merchantIdFor: (shop) => merchantByShop.get(shop)
+			});
+
+			// An uninstall can end a subscription Shopify never cancelled, so
+			// shops with relationship events are re-derived alongside the ones
+			// whose charges moved.
+			await rebuildSubscriptions(db, app.id, [...charges.shops, ...byShop.keys()]);
+
 			// Only claim the app is read up to here once a full window has landed.
 			// A run that ran out of backfill budget leaves the column null so the
 			// next one picks the app up.
@@ -776,6 +827,25 @@ export async function runFullSync(
 
 	// One pass at the end rather than once per account.
 	const released = accounts.length ? await releaseMaturedCommissions(db) : 0;
+	await refreshDueTrials(db);
+
+	// The first run after the subscription ledger shipped repairs history once,
+	// so nobody has to remember to press the button after deploying.
+	const [derived] = await db
+		.select({ key: settings.key })
+		.from(settings)
+		.where(eq(settings.key, DERIVED_KEY))
+		.limit(1);
+	if (!derived && accounts.length) await rederiveSubscriptions(db, accounts);
+
+	await dispatchSubscriptionAlerts(db);
+	for (const run of [...installs, ...transactionRuns].filter((r) => r.status === 'failed')) {
+		await notify(db, {
+			key: `sync:${run.runId}`,
+			topic: 'sync',
+			text: `:warning: Partner sync failed for ${run.partnerAccountName}: ${run.error ?? 'unknown error'}`
+		});
+	}
 
 	return {
 		accounts: accounts.length,
@@ -784,4 +854,72 @@ export async function runFullSync(
 		transactions: transactionRuns,
 		released
 	};
+}
+
+const DERIVED_KEY = 'subscriptions_derived_at';
+
+/**
+ * Fills in the charge id on transactions synced before we asked for it.
+ *
+ * Deliberately not `syncTransactions` with a deep window: that re-runs the
+ * merchant upsert and commission matching per row, several D1 calls each. This
+ * only pages the feed and writes one batch per page.
+ */
+export async function backfillChargeIds(db: DrizzleClient, account: Account) {
+	const credentials = credentialsFor(account);
+	const since = new Date(Date.now() - BACKFILL_DAYS * DAY).toISOString();
+	let after: string | null = null;
+	let updated = 0;
+
+	for (let page = 0; page < 60; page++) {
+		const result = await fetchTransactions(credentials, { after, createdAtMin: since });
+		const statements = result.transactions
+			.filter((t) => t.chargeId)
+			.map((t) =>
+				db
+					.update(transactions)
+					.set({ partnerChargeId: t.chargeId, billingInterval: t.billingInterval })
+					.where(
+						and(eq(transactions.partnerTransactionId, t.id), isNull(transactions.partnerChargeId))
+					)
+			);
+		await runBatch(db, statements);
+		updated += statements.length;
+
+		if (!result.hasNextPage || !result.cursor) break;
+		after = result.cursor;
+	}
+
+	return updated;
+}
+
+/**
+ * Re-derives every subscription of every app: charge ids first, so trial
+ * conversions and annual plans are known, then each app's shops.
+ */
+export async function rederiveSubscriptions(db: DrizzleClient, accounts: Account[]) {
+	let chargeIds = 0;
+	for (const account of accounts) {
+		try {
+			chargeIds += await backfillChargeIds(db, account);
+		} catch {
+			// A dead token fails the account's own sync too, where it is reported.
+		}
+	}
+
+	let shops = 0;
+	let events = 0;
+	for (const app of await db.select({ id: apps.id }).from(apps)) {
+		const result = await rebuildSubscriptions(db, app.id, await subscriptionShops(db, app.id));
+		shops += result.shops;
+		events += result.events;
+	}
+
+	const stamp = new Date().toISOString();
+	await db
+		.insert(settings)
+		.values({ key: DERIVED_KEY, value: stamp })
+		.onConflictDoUpdate({ target: settings.key, set: { value: stamp, updatedAt: new Date() } });
+
+	return { chargeIds, shops, events };
 }

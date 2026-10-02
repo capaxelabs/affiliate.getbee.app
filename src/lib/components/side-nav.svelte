@@ -13,10 +13,14 @@
 		user
 	}: { items: Item[]; label: string; user: { name: string | null; email: string } } = $props();
 
+	const matches = (href: string) =>
+		href === page.url.pathname || page.url.pathname.startsWith(href + '/');
+
+	// The most specific match wins, so the section root (/admin) is not lit up
+	// alongside every page beneath it.
 	function isActive(href: string) {
-		if (href === page.url.pathname) return true;
-		// Only mark a section active for its own children, never for a sibling prefix.
-		return page.url.pathname.startsWith(href + '/');
+		if (!matches(href)) return false;
+		return !items.some((other) => other.href.length > href.length && matches(other.href));
 	}
 </script>
 

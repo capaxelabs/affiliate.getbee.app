@@ -45,3 +45,23 @@ export const SOURCE_LABEL = {
 
 /** Commissions are held this long so refunds can claw back before payout. */
 export const HOLD_DAYS = 30;
+
+export const SUBSCRIPTION_EVENT_LABEL: Record<string, string> = {
+	new: 'New subscription',
+	reactivated: 'Came back',
+	upgraded: 'Upgraded',
+	downgraded: 'Downgraded',
+	churned: 'Cancelled',
+	frozen: 'Frozen',
+	unfrozen: 'Unfrozen',
+	trial_started: 'Trial started',
+	trial_converted: 'Trial converted',
+	trial_cancelled: 'Trial cancelled'
+};
+
+export const CHURN_REASON_LABEL: Record<string, string> = {
+	cancelled: 'cancelled',
+	uninstalled: 'uninstalled',
+	closed: 'store closed',
+	plan_change: 'changed plan'
+};

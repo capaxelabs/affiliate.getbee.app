@@ -21,7 +21,7 @@
 	import { LineChart } from 'layerchart';
 	import { scaleUtc } from 'd3-scale';
 	import { curveMonotoneX } from 'd3-shape';
-	import { money, relativeTime } from '$lib/format';
+	import { money, plural, relativeTime } from '$lib/format';
 	import { REFERRAL_STATUS_LABEL, SOURCE_LABEL } from '$lib/constants';
 	import type { PageData } from './$types';
 
@@ -43,8 +43,12 @@
 			: `${momChange >= 0 ? '+' : ''}${momChange.toFixed(0)}% vs last month`
 	);
 
-	const mrrCents = $derived(data.perApp.reduce((a, x) => a + x.mrrCents, 0));
-	const paidSubs = $derived(data.perApp.reduce((a, x) => a + x.activeSubscriptions, 0));
+	const mrrCents = $derived(data.mrr.mrrCents);
+	const mrrHint = $derived(
+		`${data.mrr.payingShops} paying` +
+			(data.mrr.trialShops ? ` · ${data.mrr.trialShops} on trial` : '') +
+			` · ${money(mrrCents * 12)} ARR`
+	);
 
 	// One line per app; slugs key both the series and the --color-* variables
 	// the chart wrapper generates from this config.
@@ -127,12 +131,9 @@
 			hint={momLabel}
 			icon={TrendingUpIcon}
 		/>
-		<StatCard
-			label="MRR"
-			value={money(mrrCents)}
-			hint="{paidSubs} paid {paidSubs === 1 ? 'subscription' : 'subscriptions'}, bills at cycle end"
-			icon={RepeatIcon}
-		/>
+		<a href="/admin/subscriptions" class="rounded-xl transition-shadow hover:shadow-sm">
+			<StatCard label="MRR" value={money(mrrCents)} hint={mrrHint} icon={RepeatIcon} />
+		</a>
 		{#if data.access.canViewAffiliates}
 			<StatCard
 				label="Affiliate commissions"
@@ -273,8 +274,8 @@
 			<Card.Description>
 				Every app in the program, referred installs and otherwise. Installs counts live
 				shops only, so it lines up with the Partner dashboard; closed shops sit in their
-				own column. MRR is committed — live subscriptions Shopify bills at the end of
-				each cycle, so it has not reached Gross yet.
+				own column. MRR counts paying subscriptions only: annual plans at 1/12 of their
+				price, trials once their first bill is due.
 			</Card.Description>
 			<Card.Action>
 				<Button href="/admin/apps" variant="ghost" size="sm">Manage apps</Button>
@@ -336,7 +337,7 @@
 									</Table.Cell>
 									<Table.Cell class="text-right tabular-nums">
 										{#if app.mrrCents}
-											<span title="{app.activeSubscriptions} live subscription(s), billed at the end of each cycle">
+											<span title={plural(app.activeSubscriptions, 'paying subscription')}>
 												{money(app.mrrCents)}
 											</span>
 										{:else}

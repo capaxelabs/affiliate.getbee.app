@@ -265,6 +265,54 @@ History of the removed feature:
       so imports feed `internal_shops` too. Applied 50 shops per request; the
       page re-sends the file with a growing offset until done.
 
+## Subscription analytics (2026-10-02, ideas from PartnerDex)
+
+- [x] Fix MRR: annual plans count 1/12, trials count nothing until the first
+      bill is due, frozen charges count nothing. Transactions now store the
+      Partner charge id and billing interval.
+- [x] `charge_events` raw trail; `app_charges` derived columns (interval,
+      monthly amount, paid_at, trial status, churn reason, replaced charge)
+- [x] Plan changes (cancel + activation within 60s) are upgrades or downgrades,
+      not churn; a plan change inside a trial continues the same trial
+- [x] `subscription_events` ledger with signed MRR deltas, rebuilt per shop on
+      every sync, CSV import and uninstall webhook
+- [x] Admin → Subscriptions: MRR, ARR, ARPU, LTV, revenue / subscription /
+      install churn, trial conversion, 12-month MRR chart and movement table
+- [x] App page: MRR chart, install funnel, trial and churn detail on charges
+- [x] Slack alerts (Admin → Integrations): subscriptions, trials, reviews,
+      affiliate sign-ups / claims / referrals, sync failures. Deduped per fact.
+- [x] App Store reviews (Admin → Reviews): daily sweep, removed reviews kept,
+      matched to merchants by store name, manual linking
+- [x] GA4 BigQuery listing traffic feeds the funnel's first two steps
+- [x] Data checks on Partner sync: ledger MRR vs charge MRR, sales with no
+      charge, charges with no history; "Rebuild subscriptions" button
+- [x] Sidebar no longer highlights Overview on every admin page
+- [ ] Apply `0015` remotely before pushing: `npm run db:migrate:remote`
+- [ ] After the first cron (or "Rebuild subscriptions"), check Data checks shows
+      no gaps and MRR matches the Partner dashboard
+- [ ] Click "Backfill all" so older charges get their exact event trail
+      (the migration seeds an approximate one from the current rows)
+- [ ] Add a Slack incoming webhook on Admin → Integrations
+- [ ] Add App Store listing URLs for apps that have none (Bee AI SEO) so their
+      reviews are read
+- [ ] GA4: put a measurement ID on each listing, link GA4 to BigQuery (daily),
+      then add the service account and each app's dataset on Integrations
+- [x] Partner API: usage charges, credits (`AppSaleCredit` + `CREDIT_APPLIED`),
+      capped-amount alerts
+- [x] Admin → Insights: revenue by type, weekly cash, billing due in 30 days,
+      MRR by plan, time to first payment and to cancel, install and revenue
+      retention cohorts, breakdowns by country / Shopify plan / currency,
+      uninstall reasons, traffic sources, search terms, keyword ranks,
+      competitors, active shops, activation, at-risk shops
+- [x] App Store keyword ranks and competitor ratings, daily
+- [x] GA4: traffic sources and search terms, shared-property support, two-month
+      refresh to keep BigQuery inside its free tier
+- [x] `/api/track/event` ingest, activation event per app, Activated funnel step
+- [ ] Add `trackUsage` (snippet on Integrations) to each Bee app and set
+      `AFFILIATES_APP_SLUG`; pick each app's activation event
+- [ ] Add search terms and competitors on Integrations
+- [ ] Affiliate-facing funnel per referral link: clicks → installs → trial → paid
+
 ## Abuse signals
 
 - [ ] Three Shootflo shops share the disposable-mail domain `emailinbo.live`

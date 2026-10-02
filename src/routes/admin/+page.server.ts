@@ -8,6 +8,7 @@ import {
 	revenueSeries,
 	revenueTotals
 } from '$lib/server/services/stats';
+import { mrrNow } from '$lib/server/services/metrics';
 import { affiliates, apps, referralClaims, referrals, users } from '$lib/server/db/schema';
 import type { PageServerLoad } from './$types';
 
@@ -26,7 +27,8 @@ export const load: PageServerLoad = async (event) => {
 		merchants,
 		pendingAffiliates,
 		pendingClaims,
-		recentReferrals
+		recentReferrals,
+		mrr
 	] = await Promise.all([
 		adminSummary(db, scope.appIds),
 		revenueTotals(db, scope.appIds),
@@ -84,7 +86,8 @@ export const load: PageServerLoad = async (event) => {
 			.innerJoin(users, eq(users.id, affiliates.userId))
 			.where(referralFilter)
 			.orderBy(desc(referrals.createdAt))
-			.limit(8)
+			.limit(8),
+		mrrNow(db, scope.appIds)
 	]);
 
 	// The affiliate queues stay hidden from staff without that permission.
@@ -98,6 +101,7 @@ export const load: PageServerLoad = async (event) => {
 		series,
 		dailyInstalls,
 		merchants,
+		mrr,
 		pendingAffiliates: showAffiliates ? pendingAffiliates : [],
 		pendingClaims: showAffiliates ? pendingClaims : [],
 		recentReferrals: showAffiliates ? recentReferrals : []

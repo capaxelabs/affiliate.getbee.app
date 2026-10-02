@@ -9,6 +9,7 @@ import {
 	revenueSeries
 } from '$lib/server/services/stats';
 import { applyHistoryChunk, parseAppHistoryCsv } from '$lib/server/services/history-import';
+import { installFunnel, mrrMovement, mrrNow } from '$lib/server/services/metrics';
 import type { Actions, PageServerLoad } from './$types';
 
 /** Merchants per page. Small enough that the page stays quick on D1. */
@@ -80,8 +81,19 @@ export const load: PageServerLoad = async (event) => {
 	const requested = Number(params.get('page') ?? 1);
 	const page = Math.min(pageCount, Math.max(1, Number.isFinite(requested) ? requested : 1));
 
-	const [revenue, revenue12m, lifecycle, charges, [extras], merchantRows, countries, plans] =
-		await Promise.all([
+	const [
+		revenue,
+		revenue12m,
+		lifecycle,
+		charges,
+		[extras],
+		merchantRows,
+		countries,
+		plans,
+		subscriptions,
+		movement,
+		funnel
+	] = await Promise.all([
 			revenueByApp(db, [id]),
 			revenueSeries(db, [id]),
 			appLifecycleSeries(db, id),
@@ -146,7 +158,10 @@ export const load: PageServerLoad = async (event) => {
 				.selectDistinct({ value: installs.plan })
 				.from(installs)
 				.where(and(eq(installs.appId, id), isNotNull(installs.plan)))
-				.orderBy(installs.plan)
+				.orderBy(installs.plan),
+			mrrNow(db, [id]),
+			mrrMovement(db, [id], 12),
+			installFunnel(db, id, 6)
 		]);
 
 	return {
@@ -161,6 +176,16 @@ export const load: PageServerLoad = async (event) => {
 			transactionCount: Number(extras?.transactionCount ?? 0)
 		},
 		revenueSeries: revenue12m,
+		subscriptions,
+		movement,
+		funnel: {
+			...funnel,
+			// Affiliate clicks are part of the program; hide them with it.
+			points: funnel.points.map((p) => ({
+				...p,
+				affiliateClicks: scope.canViewAffiliates ? p.affiliateClicks : null
+			}))
+		},
 		lifecycleSeries: lifecycle,
 		charges,
 		merchants: merchantRows.map((m) => ({

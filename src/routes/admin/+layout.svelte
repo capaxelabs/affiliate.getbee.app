@@ -12,14 +12,21 @@
 	import RefreshIcon from '@lucide/svelte/icons/refresh-cw';
 	import PlugIcon from '@lucide/svelte/icons/plug';
 	import ShieldIcon from '@lucide/svelte/icons/shield';
+	import RepeatIcon from '@lucide/svelte/icons/repeat';
+	import StarIcon from '@lucide/svelte/icons/star';
+	import BlocksIcon from '@lucide/svelte/icons/blocks';
+	import ChartIcon from '@lucide/svelte/icons/chart-line';
 	import type { LayoutData } from './$types';
 
 	let { data, children }: { data: LayoutData; children: import('svelte').Snippet } = $props();
 
 	const items = $derived([
 		{ href: '/admin', label: 'Overview', icon: GaugeIcon },
+		{ href: '/admin/subscriptions', label: 'Subscriptions', icon: RepeatIcon },
+		{ href: '/admin/insights', label: 'Insights', icon: ChartIcon },
 		{ href: '/admin/apps', label: 'Apps', icon: PackageIcon },
 		{ href: '/admin/merchants', label: 'Merchants', icon: BuildingIcon },
+		{ href: '/admin/reviews', label: 'Reviews', icon: StarIcon },
 		...(data.access.canViewAffiliates
 			? [
 					{
@@ -38,6 +45,7 @@
 					{ href: '/admin/payouts', label: 'Payouts', icon: CardIcon },
 					{ href: '/admin/partners', label: 'Partner accounts', icon: PlugIcon },
 					{ href: '/admin/sync', label: 'Partner sync', icon: RefreshIcon },
+					{ href: '/admin/integrations', label: 'Integrations', icon: BlocksIcon },
 					{ href: '/admin/team', label: 'Team', icon: ShieldIcon }
 				]
 			: [])

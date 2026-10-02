@@ -59,11 +59,21 @@ src/lib/server/
     partner-api.ts     Shopify Partner API GraphQL client
     sync.ts            transaction + install sync, matcher
     stats.ts           dashboard, revenue and report queries
+    charges.ts         charge projection + raw `charge_events` trail
+    subscriptions.ts   derives trials, plan changes, MRR and the ledger
+    metrics.ts         MRR history, movement, churn, ARPU, LTV, funnel
+    notifications.ts   Slack alerts, deduplicated per fact
+    reviews.ts         App Store reviews from the public listing
+    bigquery.ts        GA4 listing traffic and traffic sources from the BigQuery export
+    insights.ts        revenue mix, cashflow, cohorts, breakdowns for Admin → Insights
+    engagement.ts      in-app events: active shops, activation, churn-risk flags
+    appstore.ts        App Store keyword ranks and competitor ratings
 src/routes/
   login, logout        the only auth surface
   r/[code]/[app]       affiliate link → click record → App Store listing
   api/track/install    HMAC-signed install ingest from each Bee app
   api/track/uninstall  HMAC-signed uninstall + churn feedback ingest
+  api/track/event      HMAC-signed in-app usage events from each Bee app
   api/cron/sync        bearer-guarded Partner API sync
   app/                 affiliate portal
   admin/               staff console (see access rules below)
@@ -216,6 +226,51 @@ So `install_events` is the truth and `installs` is a projection of it:
 
 Never go back to mutating the install row directly from a webhook handler.
 
+## Subscriptions and MRR
+
+Charges follow the same split as installs: `charge_events` is the raw Partner
+trail, `app_charges` is the projection, and everything below is derived by
+`rebuildSubscriptions` — never written anywhere else.
+
+- **MRR counts paying subscriptions.** `monthly_amount_cents` is the price
+  normalised to a month (annual ÷ 12). A charge counts from `paid_at`: activation
+  when billed up front, the trial end when it started on a trial. `paid_at` can
+  sit in the future, so every MRR read compares it to now. The one definition
+  lives in `metrics.ts` (`LIVE`) and `revenueByApp`; keep them identical.
+- Only `AppSubscriptionSale.billingInterval` states a cadence. Until a sale lands
+  it is inferred from a year-out `billingOn` or the plan name.
+- A trial is a first bill more than two days after activation, on a shop that has
+  never paid for this app. Shopify grants one trial per shop.
+- **A cancel followed within a minute by an activation on the same shop is a plan
+  change**, not churn: the new charge books the difference as an upgrade or
+  downgrade. A wider window pairs real churn with a later win-back.
+- An uninstall with no cancel ends the subscription. A store closure followed by
+  a freeze does not: the store can reopen.
+- `subscription_events` is the ledger: summed to any date it is MRR on that date.
+  Rebuilds delete and rewrite a shop's rows, so anything keyed on a ledger row id
+  breaks. Slack dedupes on `(charge, type, occurred_at)` instead.
+- Rebuild the shops you touch: charge events, recurring sales and uninstalls all
+  call `rebuildSubscriptions`. The daily run also moves trials whose end passed.
+- Admin → Partner sync → Data checks compares MRR from charges with the ledger
+  sum. A gap means a rebuild was skipped.
+
+## Data from outside the Partner API
+
+- **GA4 BigQuery export** gives the listing views and Add app clicks above
+  installs, plus where visitors came from. The App Store tags every link into a
+  listing with `surface_type` and `surface_detail` (the search term), and GA4
+  keeps them in `page_location`. Apps on one shared GA4 property are told apart
+  by listing handle; an app with its own dataset counts everything in it. Only
+  the current and previous month are re-read daily — BigQuery bills every daily
+  table a query touches.
+- **App Store pages** give reviews, keyword ranks and competitor ratings. Search
+  results load in a Turbo frame (`Turbo-Frame: search_page`); rank is read from
+  the result links' `surface_intra_position`, organic results only.
+- **`/api/track/event`** takes in-app events from each Bee app, signed like the
+  install endpoint. `installs.last_active_at` and `apps.activation_event` drive
+  the activation rate and the at-risk list. Risk is rules, not a model: at this
+  volume a model would learn from a handful of churns.
+
 ## Merchant lifecycle
 
 Each Bee app posts to `/api/track/install` and `/api/track/uninstall`, both signed
@@ -257,7 +312,10 @@ the deploy.
 
 ## Scheduling
 
-Cron Triggers run `0 3 * * *` (full sync).
+Cron Triggers run `0 3 * * *`: the full Partner sync, then App Store reviews
+and GA4 listing traffic. The first run after migration `0015` also links old
+transactions to their charges and rebuilds every app's subscriptions once
+(`settings.subscriptions_derived_at`).
 
 adapter-cloudflare emits only `fetch`, and its `index.js` sets
 `worker_dest = wrangler_config.main` — it writes its bundle **to** `main`, so a

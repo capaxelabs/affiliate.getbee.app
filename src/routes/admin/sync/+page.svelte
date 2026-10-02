@@ -10,7 +10,7 @@
 	import RefreshIcon from '@lucide/svelte/icons/refresh-cw';
 	import LoaderIcon from '@lucide/svelte/icons/loader-circle';
 	import PlugIcon from '@lucide/svelte/icons/plug';
-	import { relativeTime } from '$lib/format';
+	import { money, relativeTime } from '$lib/format';
 	import type { ActionData, PageData } from './$types';
 
 	let { data, form }: { data: PageData; form: ActionData } = $props();
@@ -189,6 +189,60 @@
 					{/each}
 				</ul>
 			{/if}
+		</Card.Content>
+	</Card.Root>
+
+	<Card.Root class="gap-0 overflow-hidden p-0">
+		<Card.Header class="border-b px-5 py-4">
+			<Card.Title class="text-base">Data checks</Card.Title>
+			<Card.Description>
+				MRR read from live charges has to equal the subscription ledger added up to today. A gap
+				means a rebuild was missed. Sales with no known charge and charges with no event history
+				usually mean the app needs a backfill.
+			</Card.Description>
+			<Card.Action>
+				<form method="POST" action="?/rederive" use:enhance={run('rederive')}>
+					<Button type="submit" size="sm" variant="outline" disabled={running !== null}>
+						{#if running === 'rederive'}
+							<LoaderIcon class="size-3.5 animate-spin" />
+						{/if}
+						Rebuild subscriptions
+					</Button>
+				</form>
+			</Card.Action>
+		</Card.Header>
+		<Card.Content class="p-0">
+			<div class="overflow-x-auto">
+				<Table.Root>
+					<Table.Header>
+						<Table.Row>
+							<Table.Head>App</Table.Head>
+							<Table.Head class="text-right">MRR from charges</Table.Head>
+							<Table.Head class="text-right">MRR from ledger</Table.Head>
+							<Table.Head class="text-right">Sales with no charge</Table.Head>
+							<Table.Head class="text-right">Charges with no history</Table.Head>
+						</Table.Row>
+					</Table.Header>
+					<Table.Body>
+						{#each data.checks as check (check.appId)}
+							{@const off = check.chargeMrrCents !== check.ledgerMrrCents}
+							<Table.Row>
+								<Table.Cell class="font-medium">{check.name}</Table.Cell>
+								<Table.Cell class="text-right tabular-nums">{money(check.chargeMrrCents)}</Table.Cell>
+								<Table.Cell class="text-right tabular-nums {off ? 'font-medium text-destructive' : ''}">
+									{money(check.ledgerMrrCents)}
+								</Table.Cell>
+								<Table.Cell class="text-right tabular-nums {check.orphanSales ? 'text-amber-600' : 'text-muted-foreground'}">
+									{check.orphanSales}
+								</Table.Cell>
+								<Table.Cell class="text-right tabular-nums {check.chargesWithoutTrail ? 'text-amber-600' : 'text-muted-foreground'}">
+									{check.chargesWithoutTrail}
+								</Table.Cell>
+							</Table.Row>
+						{/each}
+					</Table.Body>
+				</Table.Root>
+			</div>
 		</Card.Content>
 	</Card.Root>
 

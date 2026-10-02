@@ -151,6 +151,22 @@ export const apps = sqliteTable(
 		 * the account's watermark and so never saw its own history.
 		 */
 		eventsSyncedAt: integer('events_synced_at', { mode: 'timestamp' }),
+		/**
+		 * The GA4 BigQuery export dataset for this app's listing, e.g.
+		 * `analytics_123456789`. Per app because each listing carries its own
+		 * measurement id. No fallback: guessing would pour one listing's traffic
+		 * into another's funnel.
+		 */
+		ga4Dataset: text('ga4_dataset'),
+		/** Average App Store rating × 100, so 4.85 is 485. */
+		ratingHundredths: integer('rating_hundredths'),
+		reviewCount: integer('review_count'),
+		reviewsSyncedAt: integer('reviews_synced_at', { mode: 'timestamp' }),
+		/**
+		 * The in-app event that means a merchant got value, e.g. `rule_created`.
+		 * Adds an Activated step to the funnel. Null until someone picks one.
+		 */
+		activationEvent: text('activation_event'),
 		...timestamps
 	},
 	(t) => [
@@ -222,6 +238,8 @@ export const installs = sqliteTable(
 		plan: text('plan'),
 		/** Set when this install is credited to an affiliate. */
 		referralId: text('referral_id'),
+		/** Newest in-app event from this shop. Null for apps that do not report usage. */
+		lastActiveAt: integer('last_active_at', { mode: 'timestamp' }),
 		...timestamps
 	},
 	(t) => [
@@ -345,6 +363,43 @@ export const appCharges = sqliteTable(
 		endedAt: integer('ended_at', { mode: 'timestamp' }),
 		/** Timestamp of the newest event folded in, so a replay cannot regress state. */
 		occurredAt: integer('occurred_at', { mode: 'timestamp' }).notNull().default(now),
+
+		/*
+		 * Everything below is derived by `rebuildSubscriptions` from the charge
+		 * trail, the sales and the install trail. Never written anywhere else.
+		 */
+
+		/**
+		 * Only a sale states the cadence; the charge on an app event carries no
+		 * interval at all. Until the first sale lands it is inferred.
+		 */
+		billingInterval: text('billing_interval', { enum: ['monthly', 'annual'] })
+			.notNull()
+			.default('monthly'),
+		/** `amountCents` normalised to a month. An annual plan counts 1/12. */
+		monthlyAmountCents: integer('monthly_amount_cents').notNull().default(0),
+		/**
+		 * When this charge starts counting toward MRR: activation for a plan
+		 * billed up front, the trial end for one that started on a trial. Can sit
+		 * in the future while a trial runs, so every MRR read compares it to now.
+		 */
+		paidAt: integer('paid_at', { mode: 'timestamp' }),
+		trialStatus: text('trial_status', {
+			enum: ['none', 'in_trial', 'converted', 'cancelled']
+		})
+			.notNull()
+			.default('none'),
+		trialEndsAt: integer('trial_ends_at', { mode: 'timestamp' }),
+		/**
+		 * When the subscription stopped, whichever way: a cancel, an uninstall
+		 * Shopify never paired with a cancel, or a store closure with no freeze.
+		 */
+		churnedAt: integer('churned_at', { mode: 'timestamp' }),
+		churnReason: text('churn_reason', {
+			enum: ['cancelled', 'uninstalled', 'closed', 'plan_change']
+		}),
+		/** The charge this one replaced in an upgrade or downgrade. */
+		replacesChargeId: text('replaces_charge_id'),
 		...timestamps
 	},
 	(t) => [
@@ -352,6 +407,91 @@ export const appCharges = sqliteTable(
 		index('app_charges_app_idx').on(t.appId),
 		index('app_charges_status_idx').on(t.status),
 		index('app_charges_shop_idx').on(t.shopDomain)
+	]
+);
+
+/**
+ * Every Partner charge event, verbatim. `app_charges` is the projection;
+ * this is the truth, the same split `install_events` and `installs` have.
+ * Keeping only the latest status made freezes, plan changes and MRR history
+ * impossible to answer.
+ */
+export const chargeEvents = sqliteTable(
+	'charge_events',
+	{
+		id: text('id')
+			.primaryKey()
+			.$defaultFn(() => newId('che')),
+		chargeId: text('charge_id')
+			.notNull()
+			.references(() => appCharges.id, { onDelete: 'cascade' }),
+		appId: text('app_id')
+			.notNull()
+			.references(() => apps.id, { onDelete: 'cascade' }),
+		action: text('action', {
+			enum: ['accepted', 'activated', 'frozen', 'unfrozen', 'cancelled', 'expired', 'declined']
+		}).notNull(),
+		amountCents: integer('amount_cents'),
+		/** As stamped on this event. On activation it is the first bill date. */
+		billingOn: integer('billing_on', { mode: 'timestamp' }),
+		occurredAt: integer('occurred_at', { mode: 'timestamp' }).notNull(),
+		createdAt: integer('created_at', { mode: 'timestamp' }).notNull().default(now)
+	},
+	(t) => [
+		index('charge_events_app_idx').on(t.appId),
+		// The sync re-reads an overlapping window and the CSV import covers the
+		// same history; this is what makes both idempotent.
+		uniqueIndex('charge_events_unique_idx').on(t.chargeId, t.action, t.occurredAt)
+	]
+);
+
+/**
+ * The subscription ledger: what happened to a shop's subscription and what it
+ * did to MRR. Derived, never written directly — `rebuildSubscriptions` deletes
+ * and rewrites a shop's rows from `app_charges` and `charge_events`, so the
+ * sum of `mrrDeltaCents` up to any date is MRR on that date.
+ */
+export const subscriptionEvents = sqliteTable(
+	'subscription_events',
+	{
+		id: text('id')
+			.primaryKey()
+			.$defaultFn(() => newId('sev')),
+		appId: text('app_id')
+			.notNull()
+			.references(() => apps.id, { onDelete: 'cascade' }),
+		chargeId: text('charge_id')
+			.notNull()
+			.references(() => appCharges.id, { onDelete: 'cascade' }),
+		merchantId: text('merchant_id').references(() => merchants.id, { onDelete: 'set null' }),
+		shopDomain: text('shop_domain').notNull(),
+		type: text('type', {
+			enum: [
+				'new',
+				'reactivated',
+				'upgraded',
+				'downgraded',
+				'churned',
+				'frozen',
+				'unfrozen',
+				'trial_started',
+				'trial_converted',
+				'trial_cancelled'
+			]
+		}).notNull(),
+		/** Signed monthly change. Zero on the trial markers. */
+		mrrDeltaCents: integer('mrr_delta_cents').notNull().default(0),
+		/** Monthly value of the subscription after this event. */
+		monthlyAmountCents: integer('monthly_amount_cents').notNull().default(0),
+		planName: text('plan_name'),
+		churnReason: text('churn_reason'),
+		occurredAt: integer('occurred_at', { mode: 'timestamp' }).notNull()
+	},
+	(t) => [
+		index('subscription_events_app_idx').on(t.appId, t.occurredAt),
+		index('subscription_events_occurred_idx').on(t.occurredAt),
+		index('subscription_events_shop_idx').on(t.appId, t.shopDomain),
+		uniqueIndex('subscription_events_unique_idx').on(t.chargeId, t.type, t.occurredAt)
 	]
 );
 
@@ -374,18 +514,26 @@ export const transactions = sqliteTable(
 		merchantId: text('merchant_id').references(() => merchants.id, { onDelete: 'set null' }),
 		shopDomain: text('shop_domain'),
 		chargeType: text('charge_type', {
-			enum: ['recurring', 'one_time', 'usage', 'adjustment', 'refund']
+			enum: ['recurring', 'one_time', 'usage', 'adjustment', 'refund', 'credit']
 		}).notNull(),
 		currency: text('currency').notNull().default('USD'),
 		/** What the merchant paid. */
 		grossAmountCents: integer('gross_amount_cents').notNull().default(0),
 		/** What we received after Shopify's cut. */
 		netAmountCents: integer('net_amount_cents').notNull().default(0),
+		/**
+		 * The charge this sale billed. Null on sales before September 2020 and on
+		 * rows synced before we asked for it.
+		 */
+		partnerChargeId: text('partner_charge_id'),
+		/** Subscription sales only. The one place the Partner API states a cadence. */
+		billingInterval: text('billing_interval', { enum: ['monthly', 'annual'] }),
 		occurredAt: integer('occurred_at', { mode: 'timestamp' }).notNull(),
 		createdAt: integer('created_at', { mode: 'timestamp' }).notNull().default(now)
 	},
 	(t) => [
 		uniqueIndex('transactions_partner_idx').on(t.partnerTransactionId),
+		index('transactions_charge_idx').on(t.partnerChargeId),
 		index('transactions_app_idx').on(t.appId),
 		index('transactions_merchant_idx').on(t.merchantId),
 		index('transactions_occurred_idx').on(t.occurredAt)
@@ -797,6 +945,261 @@ export const payoutsRelations = relations(payouts, ({ one, many }) => ({
 	commissions: many(commissions)
 }));
 
+/**
+ * Usage charges as Shopify applies them. `transactions` only sees usage once
+ * it is billed; this is the running tally inside the cycle.
+ */
+export const usageCharges = sqliteTable(
+	'usage_charges',
+	{
+		id: text('id')
+			.primaryKey()
+			.$defaultFn(() => newId('usg')),
+		appId: text('app_id')
+			.notNull()
+			.references(() => apps.id, { onDelete: 'cascade' }),
+		merchantId: text('merchant_id').references(() => merchants.id, { onDelete: 'set null' }),
+		shopDomain: text('shop_domain').notNull(),
+		/** gid://shopify/AppUsageRecord/... */
+		partnerRecordId: text('partner_record_id').notNull(),
+		name: text('name'),
+		amountCents: integer('amount_cents').notNull().default(0),
+		currency: text('currency').notNull().default('USD'),
+		occurredAt: integer('occurred_at', { mode: 'timestamp' }).notNull()
+	},
+	(t) => [
+		uniqueIndex('usage_charges_record_idx').on(t.partnerRecordId),
+		index('usage_charges_app_idx').on(t.appId, t.occurredAt)
+	]
+);
+
+/** Credits issued to merchants, from the CREDIT_APPLIED event. */
+export const appCredits = sqliteTable(
+	'app_credits',
+	{
+		id: text('id')
+			.primaryKey()
+			.$defaultFn(() => newId('crd')),
+		appId: text('app_id')
+			.notNull()
+			.references(() => apps.id, { onDelete: 'cascade' }),
+		merchantId: text('merchant_id').references(() => merchants.id, { onDelete: 'set null' }),
+		shopDomain: text('shop_domain').notNull(),
+		partnerCreditId: text('partner_credit_id').notNull(),
+		name: text('name'),
+		amountCents: integer('amount_cents').notNull().default(0),
+		currency: text('currency').notNull().default('USD'),
+		occurredAt: integer('occurred_at', { mode: 'timestamp' }).notNull()
+	},
+	(t) => [
+		uniqueIndex('app_credits_partner_idx').on(t.partnerCreditId),
+		index('app_credits_app_idx').on(t.appId, t.occurredAt)
+	]
+);
+
+/* ------------------------------------------------------------ in-app usage */
+
+/**
+ * What merchants do inside each Bee app: page views, feature use, onboarding
+ * steps. Posted to /api/track/event, signed with the ingest key like every
+ * other track endpoint.
+ */
+export const usageEvents = sqliteTable(
+	'usage_events',
+	{
+		id: text('id')
+			.primaryKey()
+			.$defaultFn(() => newId('uev')),
+		appId: text('app_id')
+			.notNull()
+			.references(() => apps.id, { onDelete: 'cascade' }),
+		merchantId: text('merchant_id').references(() => merchants.id, { onDelete: 'set null' }),
+		shopDomain: text('shop_domain').notNull(),
+		name: text('name').notNull(),
+		properties: text('properties', { mode: 'json' }).$type<Record<string, unknown>>(),
+		occurredAt: integer('occurred_at', { mode: 'timestamp' }).notNull()
+	},
+	(t) => [
+		index('usage_events_app_idx').on(t.appId, t.occurredAt),
+		index('usage_events_shop_idx').on(t.appId, t.shopDomain, t.occurredAt),
+		index('usage_events_name_idx').on(t.appId, t.name)
+	]
+);
+
+/* ---------------------------------------------------------- App Store rank */
+
+/** Search terms whose results are read daily for our and rivals' positions. */
+export const storeKeywords = sqliteTable(
+	'store_keywords',
+	{
+		id: text('id')
+			.primaryKey()
+			.$defaultFn(() => newId('kwd')),
+		keyword: text('keyword').notNull(),
+		createdAt: integer('created_at', { mode: 'timestamp' }).notNull().default(now)
+	},
+	(t) => [uniqueIndex('store_keywords_keyword_idx').on(t.keyword)]
+);
+
+/** Competitor listings to follow. Our own apps come from `apps.listingUrl`. */
+export const competitorListings = sqliteTable(
+	'competitor_listings',
+	{
+		id: text('id')
+			.primaryKey()
+			.$defaultFn(() => newId('cmp')),
+		handle: text('handle').notNull(),
+		name: text('name'),
+		ratingHundredths: integer('rating_hundredths'),
+		reviewCount: integer('review_count'),
+		checkedAt: integer('checked_at', { mode: 'timestamp' }),
+		createdAt: integer('created_at', { mode: 'timestamp' }).notNull().default(now)
+	},
+	(t) => [uniqueIndex('competitor_listings_handle_idx').on(t.handle)]
+);
+
+/** Rating and review count per listing per day, ours and competitors'. */
+export const listingSnapshots = sqliteTable(
+	'listing_snapshots',
+	{
+		id: text('id')
+			.primaryKey()
+			.$defaultFn(() => newId('lsn')),
+		handle: text('handle').notNull(),
+		day: text('day').notNull(),
+		ratingHundredths: integer('rating_hundredths'),
+		reviewCount: integer('review_count')
+	},
+	(t) => [uniqueIndex('listing_snapshots_unique_idx').on(t.handle, t.day)]
+);
+
+/**
+ * Where a listing ranked for a keyword on a day, organic results only. Null
+ * means it was not in the pages read.
+ */
+export const keywordPositions = sqliteTable(
+	'keyword_positions',
+	{
+		id: text('id')
+			.primaryKey()
+			.$defaultFn(() => newId('kwp')),
+		keywordId: text('keyword_id')
+			.notNull()
+			.references(() => storeKeywords.id, { onDelete: 'cascade' }),
+		handle: text('handle').notNull(),
+		day: text('day').notNull(),
+		position: integer('position')
+	},
+	(t) => [uniqueIndex('keyword_positions_unique_idx').on(t.keywordId, t.handle, t.day)]
+);
+
+/**
+ * Listing traffic by where it came from, per month, from the GA4 export. The
+ * App Store tags every link into a listing with `surface_type` (search,
+ * category, home, …) and `surface_detail` (the search term or category).
+ */
+export const trafficSources = sqliteTable(
+	'traffic_sources',
+	{
+		id: text('id')
+			.primaryKey()
+			.$defaultFn(() => newId('tsr')),
+		appId: text('app_id')
+			.notNull()
+			.references(() => apps.id, { onDelete: 'cascade' }),
+		period: text('period').notNull(),
+		surface: text('surface').notNull(),
+		detail: text('detail').notNull().default(''),
+		listingViews: integer('listing_views').notNull().default(0),
+		addAppClicks: integer('add_app_clicks').notNull().default(0),
+		updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull().default(now)
+	},
+	(t) => [uniqueIndex('traffic_sources_unique_idx').on(t.appId, t.period, t.surface, t.detail)]
+);
+
+/* ----------------------------------------------------------- notifications */
+
+/**
+ * One row per alert ever sent. The key is deterministic per fact, so a ledger
+ * rebuild that rewrites `subscription_events` cannot send the same alert twice.
+ */
+export const notificationDeliveries = sqliteTable('notification_deliveries', {
+	key: text('key').primaryKey(),
+	topic: text('topic').notNull(),
+	status: text('status', { enum: ['sent', 'failed'] })
+		.notNull()
+		.default('sent'),
+	error: text('error'),
+	createdAt: integer('created_at', { mode: 'timestamp' }).notNull().default(now)
+});
+
+/* ----------------------------------------------------------------- reviews */
+
+/**
+ * App Store reviews, read from the public listing. The Partner API has none.
+ * A review that drops off the listing is marked removed, not deleted.
+ */
+export const appReviews = sqliteTable(
+	'app_reviews',
+	{
+		id: text('id')
+			.primaryKey()
+			.$defaultFn(() => newId('rev')),
+		appId: text('app_id')
+			.notNull()
+			.references(() => apps.id, { onDelete: 'cascade' }),
+		/** Shopify's own review id from the listing markup. */
+		reviewKey: text('review_key').notNull(),
+		rating: integer('rating').notNull(),
+		body: text('body'),
+		/** The store name as the listing prints it. */
+		author: text('author'),
+		country: text('country'),
+		/** "About 2 months using the app", verbatim. */
+		usage: text('usage'),
+		postedAt: integer('posted_at', { mode: 'timestamp' }),
+		replied: integer('replied', { mode: 'boolean' }).notNull().default(false),
+		/** Matched by store name, or linked by hand. */
+		merchantId: text('merchant_id').references(() => merchants.id, { onDelete: 'set null' }),
+		matchedBy: text('matched_by', { enum: ['name', 'manual'] }),
+		firstSeenAt: integer('first_seen_at', { mode: 'timestamp' }).notNull().default(now),
+		lastSeenAt: integer('last_seen_at', { mode: 'timestamp' }).notNull().default(now),
+		removedAt: integer('removed_at', { mode: 'timestamp' }),
+		...timestamps
+	},
+	(t) => [
+		uniqueIndex('app_reviews_key_idx').on(t.appId, t.reviewKey),
+		index('app_reviews_posted_idx').on(t.postedAt)
+	]
+);
+
+/* ----------------------------------------------------------------- traffic */
+
+/**
+ * Listing traffic from the GA4 BigQuery export: distinct visitors who viewed
+ * the listing and who clicked "Add app", per day and per month. Stored at both
+ * grains because distinct counts do not add up — thirty daily uniques are not
+ * a month's uniques.
+ */
+export const listingTraffic = sqliteTable(
+	'listing_traffic',
+	{
+		id: text('id')
+			.primaryKey()
+			.$defaultFn(() => newId('trf')),
+		appId: text('app_id')
+			.notNull()
+			.references(() => apps.id, { onDelete: 'cascade' }),
+		grain: text('grain', { enum: ['day', 'month'] }).notNull(),
+		/** 'YYYY-MM-DD' or 'YYYY-MM'. */
+		period: text('period').notNull(),
+		listingViews: integer('listing_views').notNull().default(0),
+		addAppClicks: integer('add_app_clicks').notNull().default(0),
+		updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull().default(now)
+	},
+	(t) => [uniqueIndex('listing_traffic_unique_idx').on(t.appId, t.grain, t.period)]
+);
+
 /* ---------------------------------------------------------------- settings */
 
 /**
@@ -828,6 +1231,9 @@ export type Merchant = typeof merchants.$inferSelect;
 export type Install = typeof installs.$inferSelect;
 export type InstallEvent = typeof installEvents.$inferSelect;
 export type AppCharge = typeof appCharges.$inferSelect;
+export type ChargeEvent = typeof chargeEvents.$inferSelect;
+export type SubscriptionEvent = typeof subscriptionEvents.$inferSelect;
+export type AppReview = typeof appReviews.$inferSelect;
 export type InternalShop = typeof internalShops.$inferSelect;
 export type Transaction = typeof transactions.$inferSelect;
 export type PartnerAccount = typeof partnerAccounts.$inferSelect;

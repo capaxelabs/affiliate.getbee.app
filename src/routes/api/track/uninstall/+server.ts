@@ -2,6 +2,7 @@ import { json } from '@sveltejs/kit';
 import { z } from 'zod';
 import { findApp } from '$lib/server/services/app-registry';
 import { recordUninstall } from '$lib/server/services/merchant';
+import { rebuildSubscriptions } from '$lib/server/services/subscriptions';
 import { normalizeShopDomain } from '$lib/server/services/referral';
 import { readSignedBody } from '$lib/server/ingest';
 import type { RequestHandler } from './$types';
@@ -70,6 +71,9 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 	// No install on record means the app never told us about it — not an error
 	// worth retrying, so answer 200 with the reason.
 	if (!result) return json({ recorded: false, reason: 'no_install_on_record' });
+
+	// Shopify does not always cancel the charge, so the uninstall itself ends it.
+	await rebuildSubscriptions(locals.db, app.id, [shopDomain]);
 
 	return json({
 		recorded: true,

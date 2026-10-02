@@ -2,6 +2,7 @@ import { and, desc, eq, gt, isNull } from 'drizzle-orm';
 import type { DrizzleClient } from '$lib/server/db';
 import { apps, referralClicks, referrals } from '$lib/server/db/schema';
 import { commissionEndsAt, resolveCommissionBps } from './commission';
+import { notify } from './notifications';
 
 /** `THE-SHOP.myshopify.com` and `https://the-shop.myshopify.com/` both land here. */
 export function normalizeShopDomain(input: string): string | null {
@@ -93,8 +94,14 @@ export async function attributeReferral(
 			.where(eq(referralClicks.id, input.clickId));
 	}
 
-	return { ok: true, referral, created: true };
-}
+		await notify(db, {
+			key: `referral:${referral.id}`,
+			topic: 'affiliates',
+			text: `:handshake: *${app.name}*: ${shopDomain} is now attributed to an affiliate (${input.source})`
+		});
+
+		return { ok: true, referral, created: true };
+	}
 
 /**
  * The click a merchant actually came from, identified by the ref code their

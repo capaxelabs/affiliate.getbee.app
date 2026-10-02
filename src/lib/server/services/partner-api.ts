@@ -1,6 +1,6 @@
 /**
- * Minimal Shopify Partner API client. Only the two queries the affiliate
- * program needs: billing transactions and app installs.
+ * Minimal Shopify Partner API client: billing transactions, and each app's
+ * install and charge events.
  *
  * Credentials come from a partner account row rather than the environment, so
  * several Partner organizations can be connected at once.
@@ -30,6 +30,10 @@ export type PartnerTransaction = {
 	appName: string | null;
 	grossAmount: { amount: string; currencyCode: string } | null;
 	netAmount: { amount: string; currencyCode: string } | null;
+	/** The charge this sale billed. Null before September 2020. */
+	chargeId: string | null;
+	/** Subscription sales only. */
+	billingInterval: 'monthly' | 'annual' | null;
 };
 
 export type PartnerApp = {
@@ -79,24 +83,36 @@ query AffiliateTransactions($after: String, $createdAtMin: DateTime) {
         ... on AppSubscriptionSale {
           shop { myshopifyDomain name }
           app { id name }
+          chargeId
+          billingInterval
           grossAmount { amount currencyCode }
           netAmount { amount currencyCode }
         }
         ... on AppOneTimeSale {
           shop { myshopifyDomain name }
           app { id name }
+          chargeId
           grossAmount { amount currencyCode }
           netAmount { amount currencyCode }
         }
         ... on AppUsageSale {
           shop { myshopifyDomain name }
           app { id name }
+          chargeId
           grossAmount { amount currencyCode }
           netAmount { amount currencyCode }
         }
         ... on AppSaleAdjustment {
           shop { myshopifyDomain name }
           app { id name }
+          chargeId
+          grossAmount { amount currencyCode }
+          netAmount { amount currencyCode }
+        }
+        ... on AppSaleCredit {
+          shop { myshopifyDomain name }
+          app { id name }
+          chargeId
           grossAmount { amount currencyCode }
           netAmount { amount currencyCode }
         }
@@ -128,6 +144,10 @@ query AppEvents($appId: ID!, $after: String, $occurredAtMin: DateTime) {
         ONE_TIME_CHARGE_ACTIVATED
         ONE_TIME_CHARGE_DECLINED
         ONE_TIME_CHARGE_EXPIRED
+        USAGE_CHARGE_APPLIED
+        SUBSCRIPTION_APPROACHING_CAPPED_AMOUNT
+        SUBSCRIPTION_CAPPED_AMOUNT_UPDATED
+        CREDIT_APPLIED
       ]
     ) {
       pageInfo { hasNextPage }
@@ -151,6 +171,10 @@ query AppEvents($appId: ID!, $after: String, $occurredAtMin: DateTime) {
           ... on OneTimeChargeActivated { shop { myshopifyDomain name } charge { ...oneTime } }
           ... on OneTimeChargeDeclined { shop { myshopifyDomain name } charge { ...oneTime } }
           ... on OneTimeChargeExpired { shop { myshopifyDomain name } charge { ...oneTime } }
+          ... on UsageChargeApplied { shop { myshopifyDomain name } charge { id name test amount { amount currencyCode } } }
+          ... on SubscriptionApproachingCappedAmount { shop { myshopifyDomain name } charge { ...subscription } }
+          ... on SubscriptionCappedAmountUpdated { shop { myshopifyDomain name } charge { ...subscription } }
+          ... on CreditApplied { shop { myshopifyDomain name } appCredit { id name test amount { amount currencyCode } } }
         }
       }
     }
@@ -210,6 +234,8 @@ type TransactionsResponse = {
 				app?: { id: string; name: string } | null;
 				grossAmount?: { amount: string; currencyCode: string } | null;
 				netAmount?: { amount: string; currencyCode: string } | null;
+				chargeId?: string | null;
+				billingInterval?: 'EVERY_30_DAYS' | 'ANNUAL' | null;
 			};
 		}[];
 	};
@@ -236,7 +262,14 @@ export async function fetchTransactions(
 			appId: node.app?.id ?? null,
 			appName: node.app?.name ?? null,
 			grossAmount: node.grossAmount ?? null,
-			netAmount: node.netAmount ?? null
+			netAmount: node.netAmount ?? null,
+			chargeId: node.chargeId ?? null,
+			billingInterval:
+				node.billingInterval === 'ANNUAL'
+					? 'annual'
+					: node.billingInterval === 'EVERY_30_DAYS'
+						? 'monthly'
+						: null
 		})),
 		cursor: edges.at(-1)?.cursor ?? null,
 		hasNextPage: data.transactions.pageInfo.hasNextPage
@@ -298,6 +331,12 @@ type AppEventsResponse = {
 						billingOn?: string | null;
 						amount?: { amount: string; currencyCode: string } | null;
 					} | null;
+					appCredit?: {
+						id: string;
+						name: string | null;
+						test: boolean | null;
+						amount?: { amount: string; currencyCode: string } | null;
+					} | null;
 				};
 			}[];
 		};
@@ -332,6 +371,28 @@ const CHARGE_EVENT: Record<
 };
 
 /**
+ * Billing events that are not a charge changing state: usage applied inside a
+ * cycle, a subscription nearing or raising its usage cap, a credit issued.
+ */
+export type PartnerBillingEvent = {
+	kind: 'usage' | 'cap_approaching' | 'cap_updated' | 'credit';
+	occurredAt: string;
+	shopDomain: string | null;
+	/** The usage record, the subscription, or the credit. */
+	id: string;
+	name: string | null;
+	amount: { amount: string; currencyCode: string } | null;
+	test: boolean;
+};
+
+const BILLING_EVENT: Record<string, PartnerBillingEvent['kind']> = {
+	UsageChargeApplied: 'usage',
+	SubscriptionApproachingCappedAmount: 'cap_approaching',
+	SubscriptionCappedAmountUpdated: 'cap_updated',
+	CreditApplied: 'credit'
+};
+
+/**
  * One page of an app's event feed: installs and charges together.
  *
  * They come from the same connection, so asking for both costs one request
@@ -345,6 +406,7 @@ export async function fetchAppEvents(
 ): Promise<{
 	relationships: PartnerRelationshipEvent[];
 	charges: PartnerChargeEvent[];
+	billing: PartnerBillingEvent[];
 	cursor: string | null;
 	hasNextPage: boolean;
 }> {
@@ -372,6 +434,8 @@ export async function fetchAppEvents(
 			];
 		}),
 		charges: edges.flatMap(({ node }) => {
+			// The capped-amount events carry an AppSubscription too, but they are
+			// not state changes and must not move the charge's status.
 			const mapped = CHARGE_EVENT[node.__typename];
 			if (!mapped || !node.charge) return [];
 			return [
@@ -386,6 +450,22 @@ export async function fetchAppEvents(
 					amount: node.charge.amount ?? null,
 					billingOn: node.charge.billingOn ?? null,
 					test: Boolean(node.charge.test)
+				}
+			];
+		}),
+		billing: edges.flatMap(({ node }) => {
+			const kind = BILLING_EVENT[node.__typename];
+			const subject = node.appCredit ?? node.charge;
+			if (!kind || !subject) return [];
+			return [
+				{
+					kind,
+					occurredAt: node.occurredAt,
+					shopDomain: node.shop?.myshopifyDomain ?? null,
+					id: subject.id,
+					name: subject.name ?? null,
+					amount: subject.amount ?? null,
+					test: Boolean(subject.test)
 				}
 			];
 		}),
@@ -415,7 +495,7 @@ export function toCents(amount: string | null | undefined) {
 
 export function chargeTypeFor(
 	typename: string
-): 'recurring' | 'one_time' | 'usage' | 'adjustment' | 'refund' {
+): 'recurring' | 'one_time' | 'usage' | 'adjustment' | 'refund' | 'credit' {
 	switch (typename) {
 		case 'AppSubscriptionSale':
 			return 'recurring';
@@ -425,6 +505,8 @@ export function chargeTypeFor(
 			return 'usage';
 		case 'AppSaleAdjustment':
 			return 'adjustment';
+		case 'AppSaleCredit':
+			return 'credit';
 		default:
 			return 'adjustment';
 	}

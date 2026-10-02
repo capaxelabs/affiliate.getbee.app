@@ -2,6 +2,7 @@ import type { DrizzleClient } from '$lib/server/db';
 import type { MerchantProfile } from './merchant';
 import { recordLifecycleHistory } from './merchant';
 import { applyChargeEvents } from './charges';
+import { rebuildSubscriptions } from './subscriptions';
 import { normalizeShopDomain } from './referral';
 import type { PartnerChargeEvent } from './partner-api';
 
@@ -282,6 +283,7 @@ export async function applyHistoryChunk(
 		});
 		chargesWritten = charges.written;
 	}
+	await rebuildSubscriptions(db, options.appId, merchantByShop.keys());
 
 	return {
 		processedShops: chunk.length,

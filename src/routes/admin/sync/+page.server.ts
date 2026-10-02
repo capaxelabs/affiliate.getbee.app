@@ -2,14 +2,21 @@ import { fail } from '@sveltejs/kit';
 import { desc, eq } from 'drizzle-orm';
 import { requireOwner } from '$lib/server/scope';
 import { apps, partnerAccounts, partnerSyncRuns } from '$lib/server/db/schema';
-import { runFullSync, syncableAccounts, syncInstalls, syncTransactions } from '$lib/server/services/sync';
+import {
+	rederiveSubscriptions,
+	runFullSync,
+	syncableAccounts,
+	syncInstalls,
+	syncTransactions
+} from '$lib/server/services/sync';
+import { subscriptionConsistency } from '$lib/server/services/metrics';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async (event) => {
 	await requireOwner(event);
 	const db = event.locals.db;
 
-	const [runs, accounts, allApps] = await Promise.all([
+	const [runs, accounts, allApps, checks] = await Promise.all([
 		db
 			.select({
 				run: partnerSyncRuns,
@@ -22,9 +29,10 @@ export const load: PageServerLoad = async (event) => {
 		db.select().from(partnerAccounts).orderBy(partnerAccounts.name),
 		db
 			.select({ id: apps.id, name: apps.name, partnerAppId: apps.partnerAppId, partnerAccountId: apps.partnerAccountId })
-			.from(apps)
-			.orderBy(apps.name)
-	]);
+					.from(apps)
+					.orderBy(apps.name),
+				subscriptionConsistency(db)
+			]);
 
 	const syncable = await syncableAccounts(db);
 
@@ -41,8 +49,9 @@ export const load: PageServerLoad = async (event) => {
 			appCount: allApps.filter((app) => app.partnerAccountId === a.id).length
 		})),
 		syncableCount: syncable.length,
-		untracked: allApps.filter((a) => !a.partnerAppId || !a.partnerAccountId).length
-	};
+			untracked: allApps.filter((a) => !a.partnerAppId || !a.partnerAccountId).length,
+			checks
+		};
 };
 
 async function accountFrom(event: Parameters<Actions[string]>[0]) {
@@ -125,6 +134,20 @@ export const actions: Actions = {
 				? (failed[0].error ?? 'Backfill failed.')
 				: `${account.name}: ${installs.recordsSeen} events, ${txns.recordsSeen} transactions.` +
 					(remaining ? ` ${remaining} app(s) left — continuing…` : ' Every app is backfilled.')
+		};
+	},
+
+	/**
+	 * Fills in charge ids on old transactions, then re-derives every app's
+	 * subscriptions and ledger from what is stored. Safe to repeat.
+	 */
+	rederive: async (event) => {
+		await requireOwner(event);
+		const accounts = await syncableAccounts(event.locals.db);
+		const result = await rederiveSubscriptions(event.locals.db, accounts);
+		return {
+			success: true,
+			message: `Rebuilt ${result.shops} shops: ${result.events} ledger events, ${result.chargeIds} transactions linked to their charge.`
 		};
 	},
 

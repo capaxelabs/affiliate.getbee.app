@@ -443,7 +443,7 @@ export type AppRevenueRow = {
 	churnedInstalls: number;
 	/** Shops Shopify closed or froze. Not churn, but not active either. */
 	closedInstalls: number;
-	/** Monthly value of live subscriptions. Committed, not yet billed. */
+	/** Monthly value of paying subscriptions. Annual plans count 1/12; trials count nothing. */
 	mrrCents: number;
 	/** Paid plans only — free tiers are charges too, and counting them misleads. */
 	activeSubscriptions: number;
@@ -485,14 +485,18 @@ export async function revenueByApp(
 			closedInstalls: sql<number>`(
 				select count(*) from installs i where i.app_id = apps.id and i.status = 'closed'
 			)`,
+			// Normalised to a month and counted from the first paid moment, so an
+			// annual plan is 1/12 of its price and a running trial is nothing yet.
 			mrrCents: sql<number>`(
-				select coalesce(sum(ch.amount_cents), 0) from app_charges ch
+				select coalesce(sum(ch.monthly_amount_cents), 0) from app_charges ch
 				where ch.app_id = apps.id and ch.kind = 'recurring' and ch.status = 'active'
+					and ch.paid_at is not null and ch.paid_at <= unixepoch() and ch.churned_at is null
 			)`,
 			activeSubscriptions: sql<number>`(
 				select count(*) from app_charges ch
 				where ch.app_id = apps.id and ch.kind = 'recurring' and ch.status = 'active'
-					and ch.amount_cents > 0
+					and ch.paid_at is not null and ch.paid_at <= unixepoch() and ch.churned_at is null
+					and ch.monthly_amount_cents > 0
 			)`,
 			commissionCents: sql<number>`(
 				select coalesce(sum(c.amount_cents), 0) from commissions c where c.app_id = apps.id
@@ -690,7 +694,14 @@ export async function appChargeList(db: DrizzleClient, appId: string, limit = 50
 			status: appCharges.status,
 			activatedAt: appCharges.activatedAt,
 			billingOn: appCharges.billingOn,
-			endedAt: appCharges.endedAt
+			endedAt: appCharges.endedAt,
+			billingInterval: appCharges.billingInterval,
+			monthlyAmountCents: appCharges.monthlyAmountCents,
+			paidAt: appCharges.paidAt,
+			trialStatus: appCharges.trialStatus,
+			trialEndsAt: appCharges.trialEndsAt,
+			churnedAt: appCharges.churnedAt,
+			churnReason: appCharges.churnReason
 		})
 		.from(appCharges)
 		.where(eq(appCharges.appId, appId))

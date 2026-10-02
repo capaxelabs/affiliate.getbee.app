@@ -5,6 +5,7 @@ import { encodeBase64url, encodeHexLowerCase } from '@oslojs/encoding';
 import type { DrizzleClient } from '$lib/server/db';
 import { affiliates, loginCodes, sessions, users } from '$lib/server/db/schema';
 import { newRefCode } from '$lib/server/db/id';
+import { notify } from './services/notifications';
 
 const DAY = 1000 * 60 * 60 * 24;
 const SESSION_TTL = DAY * 30;
@@ -131,6 +132,11 @@ export async function findOrCreateUser(db: DrizzleClient, email: string, name?: 
 		.returning();
 
 	await db.insert(affiliates).values({ userId: created.id, refCode: await uniqueRefCode(db) });
+	await notify(db, {
+		key: `affiliate:${created.id}`,
+		topic: 'affiliates',
+		text: `:bust_in_silhouette: New affiliate sign-up: ${normalized} is waiting for approval`
+	});
 
 	return created;
 }
