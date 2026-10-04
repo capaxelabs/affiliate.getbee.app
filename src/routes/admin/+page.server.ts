@@ -4,11 +4,12 @@ import {
 	adminSummary,
 	merchantTotals,
 	dailyInstallsByApp,
+	dailyInstallActivity,
 	revenueByApp,
 	revenueSeries,
 	revenueTotals
 } from '$lib/server/services/stats';
-import { mrrNow } from '$lib/server/services/metrics';
+import { mrrMovement, mrrNow } from '$lib/server/services/metrics';
 import { affiliates, apps, referralClaims, referrals, users } from '$lib/server/db/schema';
 import type { PageServerLoad } from './$types';
 
@@ -28,7 +29,9 @@ export const load: PageServerLoad = async (event) => {
 		pendingAffiliates,
 		pendingClaims,
 		recentReferrals,
-		mrr
+		mrr,
+		movement,
+		activity
 	] = await Promise.all([
 		adminSummary(db, scope.appIds),
 		revenueTotals(db, scope.appIds),
@@ -87,7 +90,9 @@ export const load: PageServerLoad = async (event) => {
 			.where(referralFilter)
 			.orderBy(desc(referrals.createdAt))
 			.limit(8),
-		mrrNow(db, scope.appIds)
+		mrrNow(db, scope.appIds),
+		mrrMovement(db, scope.appIds, 2),
+		dailyInstallActivity(db, scope.appIds, 90)
 	]);
 
 	// The affiliate queues stay hidden from staff without that permission.
@@ -102,6 +107,9 @@ export const load: PageServerLoad = async (event) => {
 		dailyInstalls,
 		merchants,
 		mrr,
+		/** MRR at the end of last month, for the trend on the MRR card. */
+		mrrLastMonth: movement[0]?.mrr ?? 0,
+		activity,
 		pendingAffiliates: showAffiliates ? pendingAffiliates : [],
 		pendingClaims: showAffiliates ? pendingClaims : [],
 		recentReferrals: showAffiliates ? recentReferrals : []

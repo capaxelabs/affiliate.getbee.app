@@ -313,6 +313,18 @@ History of the removed feature:
 - [ ] Add search terms and competitors on Integrations
 - [ ] Affiliate-facing funnel per referral link: clicks → installs → trial → paid
 
+## Admin redesign (shadcn-svelte dashboard-01)
+
+- [x] Inset sidebar with grouped navigation (main, Customers, Affiliate program,
+      settings pinned to the bottom) and the account menu in the footer
+- [x] Site header with sidebar toggle, page name and a read-only badge for staff
+- [x] Stat cards in the dashboard-01 style with trend badges; overview shows MRR,
+      revenue, live installs and merchants with month-on-month change
+- [x] Interactive installs vs uninstalls area chart (3 months / 30 days / 7 days)
+- [ ] Move the affiliate portal (`/app`) onto the same shell
+- [ ] dashboard-01's drag-to-reorder data table was left out; adopt it if a
+      table needs column toggles or row selection
+
 ## Abuse signals
 
 - [ ] Three Shootflo shops share the disposable-mail domain `emailinbo.live`

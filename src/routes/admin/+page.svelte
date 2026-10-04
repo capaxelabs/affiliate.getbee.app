@@ -4,19 +4,9 @@
 	import { Button } from '$lib/components/ui/button';
 	import PageHeader from '$lib/components/page-header.svelte';
 	import StatCard from '$lib/components/stat-card.svelte';
+	import ChartAreaInteractive from '$lib/components/chart-area-interactive.svelte';
 	import ReportCard from '$lib/components/report-card.svelte';
 	import StatusBadge from '$lib/components/status-badge.svelte';
-	import DollarIcon from '@lucide/svelte/icons/circle-dollar-sign';
-	import TrendingUpIcon from '@lucide/svelte/icons/trending-up';
-	import WalletIcon from '@lucide/svelte/icons/wallet';
-	import BuildingIcon from '@lucide/svelte/icons/building-2';
-	import PlugIcon from '@lucide/svelte/icons/plug';
-	import UnplugIcon from '@lucide/svelte/icons/unplug';
-	import UsersIcon from '@lucide/svelte/icons/users';
-	import InboxIcon from '@lucide/svelte/icons/inbox';
-	import HandCoinsIcon from '@lucide/svelte/icons/hand-coins';
-	import PackageIcon from '@lucide/svelte/icons/package';
-	import RepeatIcon from '@lucide/svelte/icons/repeat';
 	import * as Chart from '$lib/components/ui/chart';
 	import { LineChart } from 'layerchart';
 	import { scaleUtc } from 'd3-scale';
@@ -44,6 +34,17 @@
 	);
 
 	const mrrCents = $derived(data.mrr.mrrCents);
+	const mrrTrend = $derived(
+		data.mrrLastMonth > 0 ? ((mrrCents - data.mrrLastMonth) / data.mrrLastMonth) * 100 : null
+	);
+	const installsNet = $derived(
+		data.activity.slice(-30).reduce((a, d) => a + d.installed - d.removed, 0)
+	);
+	const installTrend = $derived(
+		m.activeInstalls - installsNet > 0
+			? (installsNet / (m.activeInstalls - installsNet)) * 100
+			: null
+	);
 	const mrrHint = $derived(
 		`${data.mrr.payingShops} paying` +
 			(data.mrr.trialShops ? ` · ${data.mrr.trialShops} on trial` : '') +
@@ -108,60 +109,60 @@
 <PageHeader title="Overview" description="Revenue, merchants and anything waiting on you." />
 
 <div class="space-y-5 px-5 pb-10 sm:px-8">
-	<div
-		class="grid gap-4 sm:grid-cols-2 {data.access.canViewAffiliates
-			? 'xl:grid-cols-5'
-			: 'xl:grid-cols-4'}"
-	>
+	<div class="grid grid-cols-1 gap-4 @xl/main:grid-cols-2 @5xl/main:grid-cols-4">
+		<a href="/admin/subscriptions" class="rounded-xl">
+			<StatCard
+				label="MRR"
+				value={money(mrrCents)}
+				trend={mrrTrend}
+				trendLabel={mrrTrend === null ? 'No paying shops last month' : mrrTrend >= 0 ? 'Up on last month' : 'Down on last month'}
+				hint={mrrHint}
+			/>
+		</a>
 		<StatCard
-			label="Gross revenue"
-			value={money(r.grossCents)}
-			hint="All apps, all time"
-			icon={DollarIcon}
+			label="Revenue this month"
+			value={money(r.thisMonthGrossCents)}
+			trend={momChange}
+			trendLabel={momLabel}
+			hint="Gross, before Shopify's share"
 		/>
+		<StatCard
+			label="Live installs"
+			value={String(m.activeInstalls)}
+			trend={installTrend}
+			trendLabel="{installsNet >= 0 ? '+' : ''}{installsNet} in 30 days"
+			hint="{m.churnedInstalls} uninstalled · {m.closedInstalls} stores closed"
+		/>
+		<StatCard
+			label="Merchants"
+			value={String(m.total)}
+			trendLabel="{m.newThisMonth} new this month"
+			hint="{m.withEmail} can be emailed"
+		/>
+	</div>
+
+	<div class="grid grid-cols-1 gap-4 @xl/main:grid-cols-2 @5xl/main:grid-cols-4">
+		<StatCard label="Gross revenue" value={money(r.grossCents)} hint="All apps, all time" />
 		<StatCard
 			label="Net revenue"
 			value={money(r.netCents)}
 			hint="{money(r.shopifyFeeCents)} to Shopify"
-			icon={WalletIcon}
 		/>
-		<StatCard
-			label="This month"
-			value={money(r.thisMonthGrossCents)}
-			hint={momLabel}
-			icon={TrendingUpIcon}
-		/>
-		<a href="/admin/subscriptions" class="rounded-xl transition-shadow hover:shadow-sm">
-			<StatCard label="MRR" value={money(mrrCents)} hint={mrrHint} icon={RepeatIcon} />
-		</a>
 		{#if data.access.canViewAffiliates}
 			<StatCard
 				label="Affiliate commissions"
 				value={money(s.commissionsPendingCents + s.commissionsApprovedCents + s.paidLifetimeCents)}
 				hint="{money(s.payoutsDueCents)} ready to pay"
-				icon={HandCoinsIcon}
 			/>
-		{/if}
-	</div>
-
-	<div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-		<StatCard
-			label="Merchants"
-			value={String(m.total)}
-			hint="{m.newThisMonth} new this month"
-			icon={BuildingIcon}
-		/>
-		<StatCard label="Active installs" value={String(m.activeInstalls)} icon={PlugIcon} />
-		<StatCard label="Churned" value={String(m.churnedInstalls)} icon={UnplugIcon} />
-		{#if data.access.canViewAffiliates}
 			<StatCard
 				label="Affiliates"
 				value={String(s.affiliatesTotal)}
 				hint="{s.affiliatesPending} awaiting review"
-				icon={UsersIcon}
 			/>
 		{/if}
 	</div>
+
+	<ChartAreaInteractive title="Installs and uninstalls" points={data.activity} />
 
 	<Card.Root class="gap-0 p-0">
 		<Card.Header class="border-b px-5 py-4">

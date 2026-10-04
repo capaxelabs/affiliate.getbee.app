@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { Snippet } from 'svelte';
+	import { getContext, type Snippet } from 'svelte';
 	import * as Sidebar from '$lib/components/ui/sidebar';
 
 	let {
@@ -8,11 +8,16 @@
 		leading,
 		actions
 	}: { title: string; description?: string; leading?: Snippet; actions?: Snippet } = $props();
+
+	// Inside a shell with a site header, the sidebar toggle already lives there.
+	const inShell = getContext<boolean>('site-header') ?? false;
 </script>
 
 <header class="flex items-start justify-between gap-4 px-5 pt-5 pb-4 sm:px-8">
 	<div class="flex min-w-0 items-center gap-2">
-		<Sidebar.Trigger class="-ml-1 md:hidden" />
+		{#if !inShell}
+			<Sidebar.Trigger class="-ml-1 md:hidden" />
+		{/if}
 		{#if leading}
 			{@render leading()}
 		{/if}

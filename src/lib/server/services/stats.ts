@@ -812,3 +812,38 @@ export async function merchantTotals(
 		withEmail: zero(contactable[0]?.value)
 	};
 }
+
+/**
+ * Installs and departures per day across the caller's apps, zero-filled. A
+ * closed store counts as a departure, as it does everywhere else.
+ */
+export async function dailyInstallActivity(
+	db: DrizzleClient,
+	scope: AppScope = null,
+	days = 90
+) {
+	const from = new Date();
+	from.setUTCDate(from.getUTCDate() - (days - 1));
+	from.setUTCHours(0, 0, 0, 0);
+	const ids = scopeIds(scope);
+	const day = sql<string>`date(${installEvents.occurredAt}, 'unixepoch')`;
+
+	const rows = await db
+		.select({ day, type: installEvents.type, value: count() })
+		.from(installEvents)
+		.where(
+			and(
+				inArray(installEvents.type, ['installed', 'uninstalled', 'deactivated']),
+				gte(installEvents.occurredAt, from),
+				ids === null ? undefined : inArray(installEvents.appId, ids.length ? ids : [''])
+			)
+		)
+		.groupBy(day, installEvents.type);
+
+	return Array.from({ length: days }, (_, i) => {
+		const date = new Date(from.getTime() + i * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+		const of = (types: string[]) =>
+			rows.filter((r) => r.day === date && types.includes(r.type)).reduce((a, r) => a + zero(r.value), 0);
+		return { date, installed: of(['installed']), removed: of(['uninstalled', 'deactivated']) };
+	});
+}

@@ -52,7 +52,7 @@
 			</Sidebar.GroupContent>
 		</Sidebar.Group>
 	</Sidebar.Content>
-	<Sidebar.Footer class="p-0">
+	<Sidebar.Footer>
 		<NavUser name={user.name} email={user.email} />
 	</Sidebar.Footer>
 </Sidebar.Root>
