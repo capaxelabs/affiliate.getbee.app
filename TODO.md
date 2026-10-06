@@ -321,6 +321,8 @@ History of the removed feature:
 - [x] Stat cards in the dashboard-01 style with trend badges; overview shows MRR,
       revenue, live installs and merchants with month-on-month change
 - [x] Interactive installs vs uninstalls area chart (3 months / 30 days / 7 days)
+- [x] getbee.app bee mark in indigo (#4f46e5) for the logo, favicons, touch
+      icon and web manifest, so this app is told apart from getbee.app's orange
 - [ ] Move the affiliate portal (`/app`) onto the same shell
 - [ ] dashboard-01's drag-to-reorder data table was left out; adopt it if a
       table needs column toggles or row selection

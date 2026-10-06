@@ -3,6 +3,7 @@
 	import * as Sidebar from '$lib/components/ui/sidebar';
 	import NavMain, { type NavItem } from './nav-main.svelte';
 	import NavUser from './nav-user.svelte';
+	import BeeMark from './bee-mark.svelte';
 
 	let {
 		title,
@@ -28,11 +29,7 @@
 				<Sidebar.MenuButton class="data-[slot=sidebar-menu-button]:!p-1.5">
 					{#snippet child({ props })}
 						<a href="/admin" {...props}>
-							<span
-								class="flex size-6 shrink-0 items-center justify-center rounded-md bg-gradient-to-br from-indigo-500 to-sky-400 text-xs font-bold text-white"
-							>
-								B
-							</span>
+							<BeeMark class="!size-5 shrink-0 text-indigo-600 dark:text-indigo-400" />
 							<span class="text-base font-semibold">{title}</span>
 						</a>
 					{/snippet}
