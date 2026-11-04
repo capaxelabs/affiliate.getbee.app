@@ -233,6 +233,7 @@ export type RecordInstallResult = {
 	/** false when the same merchant reinstalled an app they had before. */
 	firstInstall: boolean;
 	reinstall: boolean;
+	merchant: typeof merchants.$inferSelect;
 };
 
 /**
@@ -311,7 +312,7 @@ export async function recordInstall(
 
 	const reinstall = wasUninstalled;
 
-	return { merchantId: merchant.id, installId, firstInstall, reinstall };
+	return { merchantId: merchant.id, installId, firstInstall, reinstall, merchant };
 }
 
 /** Records an uninstall. */
@@ -406,7 +407,12 @@ export async function recordUninstall(
 		});
 	}
 
-	return { installId: row.install.id, merchantId: row.merchant.id, alreadyUninstalled };
+	return {
+		installId: row.install.id,
+		merchantId: row.merchant.id,
+		merchant: row.merchant,
+		alreadyUninstalled
+	};
 }
 
 

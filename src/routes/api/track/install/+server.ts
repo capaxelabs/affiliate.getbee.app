@@ -10,6 +10,7 @@ import {
 import { recordInstall } from '$lib/server/services/merchant';
 import { findOrRegisterApp } from '$lib/server/services/app-registry';
 import { readSignedBody } from '$lib/server/ingest';
+import { sendMerchantEvent } from '$lib/server/raechly';
 import type { RequestHandler } from './$types';
 
 /**
@@ -162,6 +163,19 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 		referralId: attribution.referralId ?? null,
 		source: 'ingest'
 	});
+
+	// An OAuth re-auth posts here too; only a new install or a reinstall starts the welcome.
+	if (install && (install.firstInstall || install.reinstall)) {
+		platform!.ctx.waitUntil(
+			sendMerchantEvent(platform!.env, {
+				appSlug: app.slug,
+				name: 'app_installed',
+				merchant: install.merchant,
+				occurredAt: installedAt,
+				properties: { plan: payload.plan ?? '', reinstall: install.reinstall }
+			})
+		);
+	}
 
 	return json({
 		appRegistered: appCreated,

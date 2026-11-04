@@ -85,8 +85,11 @@ cron. Migration `0014` drops them. Journeys in Raechly send these now.
       `apps.support_email`): `node scripts/migrate-bee-merchants.mjs` in the
       raechly.com repo, dry run first.
 - [ ] `npm run db:migrate:remote`, then `npm run deploy`.
-- [ ] Decide how install and uninstall events reach Raechly from now on: each Bee
-      app posts to Raechly directly, or this app forwards them.
+- [x] Install and uninstall reach Raechly through this app (2026-11-04):
+      `src/lib/server/raechly.ts` posts `app_installed` / `app_uninstalled` with
+      the app as product, after the install or uninstall is recorded. A re-auth
+      or a redelivered webhook sends nothing. Off until `RAECHLY_API_KEY`.
+- [ ] `wrangler secret put RAECHLY_API_KEY` (a Raechly key named "Bee hub"), then push.
 
 History of the removed feature:
 

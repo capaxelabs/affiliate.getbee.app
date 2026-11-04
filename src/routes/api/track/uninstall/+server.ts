@@ -5,6 +5,7 @@ import { recordUninstall } from '$lib/server/services/merchant';
 import { rebuildSubscriptions } from '$lib/server/services/subscriptions';
 import { normalizeShopDomain } from '$lib/server/services/referral';
 import { readSignedBody } from '$lib/server/ingest';
+import { sendMerchantEvent } from '$lib/server/raechly';
 import type { RequestHandler } from './$types';
 
 /**
@@ -59,10 +60,11 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 	});
 	if (!app) return json({ error: `Unknown app "${payload.app}".` }, { status: 404 });
 
+	const uninstalledAt = payload.uninstalledAt ? new Date(payload.uninstalledAt) : new Date();
 	const result = await recordUninstall(locals.db, {
 		appId: app.id,
 		shopDomain,
-		uninstalledAt: payload.uninstalledAt ? new Date(payload.uninstalledAt) : new Date(),
+		uninstalledAt,
 		reason: payload.reason ?? null,
 		feedback: payload.feedback ?? null,
 		source: 'ingest'
@@ -74,6 +76,19 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 
 	// Shopify does not always cancel the charge, so the uninstall itself ends it.
 	await rebuildSubscriptions(locals.db, app.id, [shopDomain]);
+
+	// A redelivered webhook, or a reason sent later, must not ask the merchant twice.
+	if (!result.alreadyUninstalled) {
+		platform!.ctx.waitUntil(
+			sendMerchantEvent(platform!.env, {
+				appSlug: app.slug,
+				name: 'app_uninstalled',
+				merchant: result.merchant,
+				occurredAt: uninstalledAt,
+				properties: { reason: payload.reason ?? '' }
+			})
+		);
+	}
 
 	return json({
 		recorded: true,

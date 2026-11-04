@@ -16,3 +16,8 @@ EMAIL_API_KEY=
 # connect accounts through the UI instead.
 PARTNER_ORG_ID=
 PARTNER_API_TOKEN=
+
+# Raechly organization key (rk_...). Install and uninstall go to Raechly as
+# events for the merchant journeys. Empty: nothing is sent.
+RAECHLY_API_KEY=
+# RAECHLY_URL=http://localhost:8080
