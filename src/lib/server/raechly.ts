@@ -153,6 +153,15 @@ export async function sendMissedLifecycleEvents(
 						and x.id <> ${installEvents.id}
 						and abs(x.occurred_at - ${installEvents.occurredAt}) <= 600
 						and (x.source = 'ingest' or x.created_at < ${runStart})
+				)`,
+				// Only the shop's latest state: a missed install followed by an uninstall
+				// would otherwise start a welcome for a shop that already left.
+				sql`not exists (
+					select 1 from install_events y
+					where y.install_id = ${installEvents.installId}
+						and y.type in ('installed', 'uninstalled', 'deactivated')
+						and y.occurred_at > ${installEvents.occurredAt}
+						and (y.type <> ${installEvents.type} or y.occurred_at - ${installEvents.occurredAt} > 600)
 				)`
 			)
 		)
