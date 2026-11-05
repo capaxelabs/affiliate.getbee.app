@@ -90,11 +90,11 @@ cron. Migration `0014` drops them. Journeys in Raechly send these now.
       the app as product, after the install or uninstall is recorded. A re-auth
       or a redelivered webhook sends nothing. Off until `RAECHLY_API_KEY`.
 - [x] `wrangler secret put RAECHLY_API_KEY` (Raechly key "Bee apps", 2026-11-05).
-- [x] In-app milestones reach Raechly too (2026-11-05): `/api/track/event` passes every event except
-      `page_view` to Raechly as a product event for that merchant, one batch per request, nothing for
-      internal shops. Apps send what the merchant did (`image_created`, `bulk_run_started`, `subscribed`).
-- [ ] Each Bee app adds `reportEvents` to its `affiliates.server.ts` (Shootflo first) and calls it at its
-      milestones. Done when a real store's first milestone shows in Raechly › App users.
+- [x] Install and uninstall carry tags for the app (2026-11-05): `app_status` (installed or uninstalled),
+      `installed_at`, `uninstalled_at`, `install_count`, kept per product in Raechly, so a shop that left
+      and came back reads as installed with its count.
+- [x] In-app milestones and their tags go from each app to Raechly directly (owner, 2026-11-05), not
+      through `/api/track/event`, which only records usage here. Shootflo first (`services/raechly.server.ts`).
 
 History of the removed feature:
 

@@ -3,10 +3,12 @@ import type { merchants } from '$lib/server/db/schema';
 type Merchant = typeof merchants.$inferSelect;
 
 /**
- * Merchant email lives in Raechly journeys: install, uninstall and in-app
- * milestones reach it as events, scoped to the app's product. Best effort on
- * purpose: a Raechly outage must never fail an app's webhook or usage report.
- * Without RAECHLY_API_KEY this does nothing.
+ * Merchant email lives in Raechly journeys: install and uninstall reach it as
+ * events, scoped to the app's product, with the install's tags (app_status,
+ * installed_at, uninstalled_at, install_count). In-app milestones and their
+ * tags go from each app to Raechly directly. Best effort on purpose: a Raechly
+ * outage must never fail an app's webhook. Without RAECHLY_API_KEY this does
+ * nothing.
  */
 export async function sendMerchantEvent(
 	env: Env,
@@ -16,10 +18,15 @@ export async function sendMerchantEvent(
 		merchant: Merchant;
 		occurredAt: Date;
 		properties?: Record<string, unknown>;
+		/** Tags for this app's person in Raechly, kept per product. */
+		attributes?: Record<string, unknown>;
 	}
 ) {
-	const { name, occurredAt, properties, ...rest } = options;
-	await sendMerchantEvents(env, { ...rest, events: [{ name, occurredAt, properties }] });
+	const { name, occurredAt, properties, attributes, ...rest } = options;
+	await sendMerchantEvents(env, {
+		...rest,
+		events: [{ name, occurredAt, properties, attributes }]
+	});
 }
 
 /** Up to 100 events for one merchant in one request, as Raechly's batch form allows. */
@@ -28,7 +35,12 @@ export async function sendMerchantEvents(
 	options: {
 		appSlug: string;
 		merchant: Merchant;
-		events: { name: string; occurredAt: Date; properties?: Record<string, unknown> | null }[];
+		events: {
+			name: string;
+			occurredAt: Date;
+			properties?: Record<string, unknown> | null;
+			attributes?: Record<string, unknown>;
+		}[];
 	}
 ) {
 	const { RAECHLY_API_KEY: key, RAECHLY_URL: base } = env as Env & {
@@ -67,7 +79,8 @@ export async function sendMerchantEvents(
 			shop_name: shopName,
 			shopify_plan: merchant.shopifyPlan ?? '',
 			country: merchant.country ?? '',
-			...(timezone ? { timezone } : {})
+			...(timezone ? { timezone } : {}),
+			...e.attributes
 		},
 		properties: e.properties ?? {}
 	}));

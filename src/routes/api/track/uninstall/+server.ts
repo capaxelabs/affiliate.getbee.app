@@ -85,7 +85,8 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 				name: 'app_uninstalled',
 				merchant: result.merchant,
 				occurredAt: uninstalledAt,
-				properties: { reason: payload.reason ?? '' }
+				properties: { reason: payload.reason ?? '' },
+				attributes: { app_status: 'uninstalled', uninstalled_at: uninstalledAt.toISOString() }
 			})
 		);
 	}

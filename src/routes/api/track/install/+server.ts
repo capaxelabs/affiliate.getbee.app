@@ -1,7 +1,7 @@
 import { json } from '@sveltejs/kit';
 import { and, eq } from 'drizzle-orm';
 import { z } from 'zod';
-import { affiliates, apps } from '$lib/server/db/schema';
+import { affiliates, apps, installs } from '$lib/server/db/schema';
 import {
 	attributeReferral,
 	findClickForRefCode,
@@ -166,13 +166,25 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 
 	// An OAuth re-auth posts here too; only a new install or a reinstall starts the welcome.
 	if (install && (install.firstInstall || install.reinstall)) {
+		const [row] = await locals.db
+			.select({ installCount: installs.installCount })
+			.from(installs)
+			.where(eq(installs.id, install.installId))
+			.limit(1);
 		platform!.ctx.waitUntil(
 			sendMerchantEvent(platform!.env, {
 				appSlug: app.slug,
 				name: 'app_installed',
 				merchant: install.merchant,
 				occurredAt: installedAt,
-				properties: { plan: payload.plan ?? '', reinstall: install.reinstall }
+				properties: { plan: payload.plan ?? '', reinstall: install.reinstall },
+				// Current state, so a shop that left and came back reads as installed again.
+				attributes: {
+					app_status: 'installed',
+					installed_at: installedAt.toISOString(),
+					uninstalled_at: '',
+					install_count: row?.installCount ?? 1
+				}
 			})
 		);
 	}
