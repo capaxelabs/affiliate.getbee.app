@@ -95,6 +95,13 @@ cron. Migration `0014` drops them. Journeys in Raechly send these now.
       and came back reads as installed with its count.
 - [x] In-app milestones and their tags go from each app to Raechly directly (owner, 2026-11-05), not
       through `/api/track/event`, which only records usage here. Shootflo first (`services/raechly.server.ts`).
+- [x] Safety net (2026-11-05): the daily Partner API sync sends Raechly any install or uninstall from the
+      last 3 days that no app reported and no earlier run saw (`sendMissedLifecycleEvents`), a day late at
+      most. Shootflo only reported from 2026-10-19 (26 installs in 30 days, 11 reported); since then it
+      missed one uninstall (a1ucmf-fe, 23 Oct), and reinstalls on the-bee-store-3 went unreported by
+      Shootflo and Bee Subscriptions.
+- [ ] Check after the next 03:00 UTC sync: Raechly events with source `bee-affiliates` for any install the
+      apps missed; and the first live install since the key went in arrives within a minute.
 
 History of the removed feature:
 

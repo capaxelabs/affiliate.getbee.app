@@ -1,6 +1,11 @@
-import type { merchants } from '$lib/server/db/schema';
+import { and, asc, eq, gte, inArray, sql } from 'drizzle-orm';
+import type { DrizzleClient } from '$lib/server/db';
+import { installEvents, installs, merchants } from '$lib/server/db/schema';
 
 type Merchant = typeof merchants.$inferSelect;
+
+/** How recent a missed install or uninstall must be to still be worth an email. */
+const MISSED_WINDOW_DAYS = 3;
 
 /**
  * Merchant email lives in Raechly journeys: install and uninstall reach it as
@@ -112,4 +117,83 @@ export async function sendMerchantEvents(
 	} catch (err) {
 		console.error(`${label}:`, err);
 	}
+}
+
+/**
+ * The Partner API sync's safety net. An app that missed its webhook, or wasn't
+ * reporting yet, leaves an install or uninstall only the sync sees; this sends
+ * it to Raechly so the merchant still gets the welcome or the uninstall
+ * question, a day late at most.
+ *
+ * Only events this run inserted, from the last few days, that no app report
+ * and no earlier run already has. The sync re-reads two weeks every time and a
+ * first run reads years; neither may email anyone about old news.
+ */
+export async function sendMissedLifecycleEvents(
+	db: DrizzleClient,
+	env: Env,
+	options: { appSlug: string; installId: string; merchantId: string; runStartedAt: Date }
+) {
+	const runStart = Math.floor(options.runStartedAt.getTime() / 1000);
+	const recent = Math.floor(Date.now() / 1000) - MISSED_WINDOW_DAYS * 86400;
+	const missed = await db
+		.select({ type: installEvents.type, occurredAt: installEvents.occurredAt })
+		.from(installEvents)
+		.where(
+			and(
+				eq(installEvents.installId, options.installId),
+				inArray(installEvents.type, ['installed', 'uninstalled']),
+				eq(installEvents.source, 'partner_api'),
+				gte(installEvents.createdAt, new Date(runStart * 1000)),
+				gte(installEvents.occurredAt, new Date(recent * 1000)),
+				// Ten minutes either way, the same tolerance recordInstall uses for its own duplicates.
+				sql`not exists (
+					select 1 from install_events x
+					where x.install_id = ${installEvents.installId} and x.type = ${installEvents.type}
+						and x.id <> ${installEvents.id}
+						and abs(x.occurred_at - ${installEvents.occurredAt}) <= 600
+						and (x.source = 'ingest' or x.created_at < ${runStart})
+				)`
+			)
+		)
+		.orderBy(asc(installEvents.occurredAt));
+	if (missed.length === 0) return 0;
+
+	const [merchant] = await db
+		.select()
+		.from(merchants)
+		.where(eq(merchants.id, options.merchantId))
+		.limit(1);
+	const [install] = await db
+		.select({ installCount: installs.installCount })
+		.from(installs)
+		.where(eq(installs.id, options.installId))
+		.limit(1);
+	if (!merchant) return 0;
+
+	await sendMerchantEvents(env, {
+		appSlug: options.appSlug,
+		merchant,
+		events: missed.map((e) =>
+			e.type === 'installed'
+				? {
+						name: 'app_installed',
+						occurredAt: e.occurredAt,
+						properties: { source: 'partner_api' },
+						attributes: {
+							app_status: 'installed',
+							installed_at: e.occurredAt.toISOString(),
+							uninstalled_at: '',
+							install_count: install?.installCount ?? 1
+						}
+					}
+				: {
+						name: 'app_uninstalled',
+						occurredAt: e.occurredAt,
+						properties: { source: 'partner_api', reason: '' },
+						attributes: { app_status: 'uninstalled', uninstalled_at: e.occurredAt.toISOString() }
+					}
+		)
+	});
+	return missed.length;
 }

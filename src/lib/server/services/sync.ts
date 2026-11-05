@@ -13,6 +13,7 @@ import { recordCommission, releaseMaturedCommissions } from './commission';
 import { normalizeShopDomain } from './referral';
 import { isInternalDomain, loadInternalShops } from './internal-shops';
 import { recordInstall, recordLifecycleHistory, upsertMerchant } from './merchant';
+import { sendMissedLifecycleEvents } from '$lib/server/raechly';
 import { findListing } from './listing';
 import { findAdoptableApp, uniqueSlug } from './app-registry';
 import {
@@ -73,7 +74,11 @@ export async function failStaleRuns(db: DrizzleClient, olderThanMinutes = 15) {
 export async function syncableAccounts(db: DrizzleClient, partnerAccountId?: string) {
 	const filters = [eq(partnerAccounts.status, 'active'), isNotNull(partnerAccounts.apiToken)];
 	if (partnerAccountId) filters.push(eq(partnerAccounts.id, partnerAccountId));
-	return db.select().from(partnerAccounts).where(and(...filters)).orderBy(partnerAccounts.name);
+	return db
+		.select()
+		.from(partnerAccounts)
+		.where(and(...filters))
+		.orderBy(partnerAccounts.name);
 }
 
 function credentialsFor(account: Account): PartnerCredentials {
@@ -353,10 +358,7 @@ export async function syncTransactions(
 
 		// Only apps belonging to this account can match its transactions.
 		const appsByPartnerId = new Map<string, typeof apps.$inferSelect>();
-		for (const app of await db
-			.select()
-			.from(apps)
-			.where(eq(apps.partnerAccountId, account.id))) {
+		for (const app of await db.select().from(apps).where(eq(apps.partnerAccountId, account.id))) {
 			if (app.partnerAppId) appsByPartnerId.set(app.partnerAppId, app);
 		}
 
@@ -459,7 +461,11 @@ async function applyTransaction(
 	// Every shop that pays us becomes a merchant, referred or not.
 	let merchantId: string | null = null;
 	if (shopDomain) {
-		const merchant = await upsertMerchant(db, { shopDomain, name: txn.shopName ?? null }, occurredAt);
+		const merchant = await upsertMerchant(
+			db,
+			{ shopDomain, name: txn.shopName ?? null },
+			occurredAt
+		);
 		merchantId = merchant?.id ?? null;
 	}
 
@@ -704,6 +710,15 @@ export async function syncInstalls(
 				if (!result) continue;
 				merchantByShop.set(shopDomain, result.merchantId);
 				matched += entry.events.length;
+
+				if (result.inserted > 0) {
+					await sendMissedLifecycleEvents(db, env, {
+						appSlug: app.slug,
+						installId: result.installId,
+						merchantId: result.merchantId,
+						runStartedAt: startedAt
+					});
+				}
 
 				// Only shops with a pending referral need the extra write.
 				const firstInstall = entry.events.find((e) => e.type === 'installed');
