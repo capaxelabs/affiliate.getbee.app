@@ -384,7 +384,7 @@
 											label={humanize(charge.status)}
 										/>
 										{#if charge.trialStatus === 'in_trial'}
-											<span class="mt-0.5 block text-xs text-amber-600">
+											<span class="mt-0.5 block text-xs text-amber-600 dark:text-amber-400">
 												On trial until {shortDate(charge.trialEndsAt)}
 											</span>
 										{:else if charge.trialStatus === 'converted'}
@@ -593,7 +593,7 @@
 								<Table.Cell class="text-muted-foreground">
 									{row.plan ?? row.shopifyPlan ?? '—'}
 									{#if row.referralId}
-										<span class="mt-0.5 block text-xs text-indigo-600">Referred</span>
+										<span class="mt-0.5 block text-xs text-indigo-600 dark:text-indigo-400">Referred</span>
 									{/if}
 								</Table.Cell>
 								<Table.Cell class="text-muted-foreground">

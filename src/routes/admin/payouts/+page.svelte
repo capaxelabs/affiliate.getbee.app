@@ -72,7 +72,7 @@
 										{/if}
 									{:else}
 										<span
-											class="inline-flex items-center gap-1 text-sm text-amber-600"
+											class="inline-flex items-center gap-1 text-sm text-amber-600 dark:text-amber-400"
 											title="They haven't set payout details"
 										>
 											<TriangleAlertIcon class="size-3.5" /> Not set

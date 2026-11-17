@@ -535,7 +535,7 @@
 										<Table.Cell class="text-right tabular-nums {p.own ? 'font-medium' : 'text-muted-foreground'}">
 											{p.now ?? '—'}
 											{#if delta}
-												<span class="ml-1 text-xs {delta.startsWith('▲') ? 'text-emerald-600' : 'text-red-600'}">
+												<span class="ml-1 text-xs {delta.startsWith('▲') ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}">
 													{delta}
 												</span>
 											{/if}

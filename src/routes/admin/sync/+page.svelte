@@ -89,7 +89,7 @@
 
 <div class="space-y-5 px-5 pb-10 sm:px-8">
 	{#if data.untracked > 0}
-		<div class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+		<div class="rounded-lg border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/10 px-4 py-3 text-sm text-amber-800 dark:text-amber-300">
 			{data.untracked}
 			{data.untracked === 1 ? 'app is' : 'apps are'} missing a partner account or a Partner app id, so
 			the sync skips {data.untracked === 1 ? 'it' : 'them'}. Fix that on the
@@ -232,10 +232,10 @@
 								<Table.Cell class="text-right tabular-nums {off ? 'font-medium text-destructive' : ''}">
 									{money(check.ledgerMrrCents)}
 								</Table.Cell>
-								<Table.Cell class="text-right tabular-nums {check.orphanSales ? 'text-amber-600' : 'text-muted-foreground'}">
+								<Table.Cell class="text-right tabular-nums {check.orphanSales ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground'}">
 									{check.orphanSales}
 								</Table.Cell>
-								<Table.Cell class="text-right tabular-nums {check.chargesWithoutTrail ? 'text-amber-600' : 'text-muted-foreground'}">
+								<Table.Cell class="text-right tabular-nums {check.chargesWithoutTrail ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground'}">
 									{check.chargesWithoutTrail}
 								</Table.Cell>
 							</Table.Row>

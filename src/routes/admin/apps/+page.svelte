@@ -213,9 +213,9 @@
 											{app.name}
 										</a>
 										{#if !app.partnerAppId}
-											<p class="text-xs text-amber-600">No Partner app id — sync will skip it</p>
+											<p class="text-xs text-amber-600 dark:text-amber-400">No Partner app id — sync will skip it</p>
 										{:else if !app.partnerAccountId}
-											<p class="text-xs text-amber-600">No partner account — sync will skip it</p>
+											<p class="text-xs text-amber-600 dark:text-amber-400">No partner account — sync will skip it</p>
 										{:else if !app.listingUrl}
 											<p class="text-xs text-muted-foreground">
 												Add a listing URL to offer it to affiliates
@@ -234,7 +234,7 @@
 											size="sm"
 											variant={app.affiliateEnabled ? 'secondary' : 'ghost'}
 											class={app.affiliateEnabled
-												? 'gap-1.5 border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+												? 'gap-1.5 border border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-500/20'
 												: 'gap-1.5 text-muted-foreground'}
 											title={app.listingUrl
 												? undefined
@@ -377,7 +377,7 @@
 					</Select.Content>
 				</Select.Root>
 				{#if data.accounts.length === 0}
-					<p class="text-xs text-amber-600">
+					<p class="text-xs text-amber-600 dark:text-amber-400">
 						No partner accounts yet — <a href="/admin/partners" class="underline">connect one</a> so
 						this app can sync.
 					</p>

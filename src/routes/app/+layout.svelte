@@ -23,16 +23,16 @@
 	<SideNav {items} label="Affiliates" user={data.user} />
 	<Sidebar.Inset class="bg-muted/40">
 		{#if data.user.affiliateStatus === 'pending'}
-			<div class="border-b border-amber-200 bg-amber-50 px-5 py-3 text-sm text-amber-800 sm:px-8">
+			<div class="border-b border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/10 px-5 py-3 text-sm text-amber-800 dark:text-amber-300 sm:px-8">
 				Your account is awaiting approval — referrals start counting once you're approved.
 			</div>
 		{:else if data.user.affiliateStatus === 'suspended'}
-			<div class="border-b border-red-200 bg-red-50 px-5 py-3 text-sm text-red-800 sm:px-8">
+			<div class="border-b border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/10 px-5 py-3 text-sm text-red-800 dark:text-red-300 sm:px-8">
 				Your account is suspended. Existing commissions are safe, but new referrals won't be
 				tracked.
 			</div>
 		{:else if data.user.affiliateStatus === 'rejected'}
-			<div class="border-b border-red-200 bg-red-50 px-5 py-3 text-sm text-red-800 sm:px-8">
+			<div class="border-b border-red-200 dark:border-red-500/30 bg-red-50 dark:bg-red-500/10 px-5 py-3 text-sm text-red-800 dark:text-red-300 sm:px-8">
 				Your application wasn't approved. Reply to our email if you'd like another look.
 			</div>
 		{/if}

@@ -155,9 +155,9 @@
 								<Table.Cell class="text-right tabular-nums">{signed(p.frozen)}</Table.Cell>
 								<Table.Cell
 									class="text-right font-medium tabular-nums {p.net < 0
-										? 'text-red-600'
+										? 'text-red-600 dark:text-red-400'
 										: p.net > 0
-											? 'text-emerald-600'
+											? 'text-emerald-600 dark:text-emerald-400'
 											: ''}"
 								>
 									{signed(p.net)}
@@ -246,8 +246,8 @@
 									{#if e.mrrDeltaCents}
 										<span
 											class="text-sm font-medium tabular-nums {e.mrrDeltaCents < 0
-												? 'text-red-600'
-												: 'text-emerald-600'}"
+												? 'text-red-600 dark:text-red-400'
+												: 'text-emerald-600 dark:text-emerald-400'}"
 										>
 											{signed(e.mrrDeltaCents)}
 										</span>

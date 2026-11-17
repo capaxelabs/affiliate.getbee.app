@@ -145,7 +145,7 @@
 								<Table.Cell class="text-muted-foreground">
 									{row.appName}
 									{#if row.referralId}
-										<span class="mt-0.5 block text-xs text-indigo-600">Referred</span>
+										<span class="mt-0.5 block text-xs text-indigo-600 dark:text-indigo-400">Referred</span>
 									{/if}
 								</Table.Cell>
 								<Table.Cell>

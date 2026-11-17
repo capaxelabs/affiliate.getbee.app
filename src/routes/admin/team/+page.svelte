@@ -73,7 +73,7 @@
 				</Card.Description>
 				<Card.Action>
 					{#if member.role === 'admin'}
-						<Badge variant="outline" class="border-indigo-200 bg-indigo-50 text-indigo-700">
+						<Badge variant="outline" class="border-indigo-200 dark:border-indigo-500/30 bg-indigo-50 dark:bg-indigo-500/10 text-indigo-700 dark:text-indigo-300">
 							Full admin
 						</Badge>
 					{:else}

@@ -84,7 +84,7 @@
 	{/if}
 
 	{#if data.unassignedApps > 0 && data.accounts.length > 0}
-		<div class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+		<div class="rounded-lg border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/10 px-4 py-3 text-sm text-amber-800 dark:text-amber-300">
 			{data.unassignedApps}
 			{data.unassignedApps === 1 ? 'app is' : 'apps are'} not linked to a partner account, so the sync
 			skips {data.unassignedApps === 1 ? 'it' : 'them'}. Set the account on the
@@ -128,7 +128,7 @@
 								{#if account.hasToken}
 									{account.apiTokenHint}
 								{:else}
-									<span class="text-amber-600">Not set</span>
+									<span class="text-amber-600 dark:text-amber-400">Not set</span>
 								{/if}
 							</Table.Cell>
 							<Table.Cell class="text-muted-foreground">{account.apiVersion}</Table.Cell>

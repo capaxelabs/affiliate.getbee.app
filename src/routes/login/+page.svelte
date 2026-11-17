@@ -99,7 +99,7 @@
 					{#if form?.error}
 						<p class="text-sm text-destructive">{form.error}</p>
 					{:else if form && 'resent' in form && form.resent}
-						<p class="text-sm text-emerald-600">New code sent.</p>
+						<p class="text-sm text-emerald-600 dark:text-emerald-400">New code sent.</p>
 					{/if}
 
 					<Button type="submit" class="w-full" disabled={submitting}>

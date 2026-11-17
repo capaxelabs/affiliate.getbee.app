@@ -329,6 +329,10 @@ History of the removed feature:
       ("Trial converted +$9.99"), not a second "New subscription" row
 - [x] Insights → MRR by plan counts only charges that bill something, like
       Paying shops on Subscriptions does
+- [x] Dark theme everywhere (`class="dark"` on `<html>`); status badges,
+      banners and coloured text have dark variants
+- [ ] Look over the admin and portal pages in dark and fix anything that
+      reads badly; only the login page was checked
 - [ ] Add search terms and competitors on Integrations
 - [ ] Affiliate-facing funnel per referral link: clicks → installs → trial → paid
 
