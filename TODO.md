@@ -325,6 +325,10 @@ History of the removed feature:
 - [x] `/api/track/event` ingest, activation event per app, Activated funnel step
 - [ ] Add `trackUsage` (snippet on Integrations) to each Bee app and set
       `AFFILIATES_APP_SLUG`; pick each app's activation event
+- [x] Subscriptions → Latest changes: a trial converting shows one row
+      ("Trial converted +$9.99"), not a second "New subscription" row
+- [x] Insights → MRR by plan counts only charges that bill something, like
+      Paying shops on Subscriptions does
 - [ ] Add search terms and competitors on Integrations
 - [ ] Affiliate-facing funnel per referral link: clicks → installs → trial → paid
 

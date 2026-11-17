@@ -172,6 +172,7 @@ export async function mrrByPlan(db: DrizzleClient, scope: AppScope = null) {
 				eq(appCharges.status, 'active'),
 				sql`${appCharges.paidAt} <= unixepoch()`,
 				sql`${appCharges.churnedAt} is null`,
+				sql`${appCharges.monthlyAmountCents} > 0`,
 				limitTo(scope, appCharges.appId)
 			)
 		)

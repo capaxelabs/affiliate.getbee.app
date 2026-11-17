@@ -472,7 +472,7 @@ export async function recentSubscriptionEvents(
 	scope: AppScope = null,
 	limit = 15
 ) {
-	return db
+	const rows = await db
 		.select({
 			id: subscriptionEvents.id,
 			type: subscriptionEvents.type,
@@ -494,7 +494,21 @@ export async function recentSubscriptionEvents(
 			)
 		)
 		.orderBy(sql`${subscriptionEvents.occurredAt} desc`)
-		.limit(limit);
+		.limit(limit * 2);
+
+	// A trial converting writes two ledger rows for one moment: the outcome and
+	// the MRR it starts. Show them as one, carrying the amount on the conversion.
+	const moment = (r: (typeof rows)[number]) =>
+		`${r.appId}:${r.shopDomain}:${r.occurredAt.getTime()}`;
+	const started = new Map(rows.filter((r) => r.type === 'new').map((r) => [moment(r), r]));
+	const folded = new Set<string>();
+	const merged = rows.map((r) => {
+		const paid = r.type === 'trial_converted' ? started.get(moment(r)) : undefined;
+		if (!paid) return r;
+		folded.add(paid.id);
+		return { ...r, mrrDeltaCents: paid.mrrDeltaCents };
+	});
+	return merged.filter((r) => !folded.has(r.id)).slice(0, limit);
 }
 
 export type ConsistencyRow = {
