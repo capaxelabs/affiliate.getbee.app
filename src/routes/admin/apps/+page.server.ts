@@ -46,6 +46,7 @@ export const load: PageServerLoad = async (event) => {
 				netCents: stats?.netCents ?? 0,
 				thisMonthGrossCents: stats?.thisMonthGrossCents ?? 0,
 				activeInstalls: stats?.activeInstalls ?? 0,
+				paidInstalls: stats?.paidInstalls ?? 0,
 				churnedInstalls: stats?.churnedInstalls ?? 0
 			};
 		}),

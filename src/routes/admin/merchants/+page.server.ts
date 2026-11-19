@@ -2,6 +2,7 @@ import { and, desc, eq, like, or, sql } from 'drizzle-orm';
 import { requireAdminAccess, appScopeFilter } from '$lib/server/scope';
 import { apps, installs, merchants } from '$lib/server/db/schema';
 import { merchantTotals } from '$lib/server/services/stats';
+import { STORE_TYPES, storeType, storeTypeSql } from '$lib/server/services/shop-plan';
 import type { PageServerLoad } from './$types';
 
 const STATUSES = ['installed', 'uninstalled', 'closed'] as const;
@@ -15,7 +16,15 @@ export const load: PageServerLoad = async (event) => {
 	const statusParam = event.url.searchParams.get('status') ?? '';
 	const status = (STATUSES as readonly string[]).includes(statusParam) ? statusParam : '';
 
+	// Paying stores are the default view. `all` is the only way to see the rest together.
+	const storeParam = event.url.searchParams.get('store') ?? 'paid';
+	const store =
+		storeParam === 'all' || (STORE_TYPES as readonly string[]).includes(storeParam)
+			? storeParam
+			: 'paid';
+
 	const filters = [];
+	if (store !== 'all') filters.push(sql`${storeTypeSql(merchants.shopifyPlan)} = ${store}`);
 	const scopeFilter = appScopeFilter(scope, installs.appId);
 	if (scopeFilter) filters.push(scopeFilter);
 	if (appId) filters.push(eq(installs.appId, appId));
@@ -74,6 +83,7 @@ export const load: PageServerLoad = async (event) => {
 		canViewAffiliates: scope.canViewAffiliates,
 		installs: rows.map((r) => ({
 			...r,
+			storeType: storeType(r.shopifyPlan),
 			// Hide the affiliate link from staff who cannot see the program.
 			referralId: scope.canViewAffiliates ? r.referralId : null,
 			revenueCents: Number(r.revenueCents ?? 0)
@@ -82,6 +92,7 @@ export const load: PageServerLoad = async (event) => {
 		totals,
 		search,
 		appId,
-		status
+		status,
+		store
 	};
 };

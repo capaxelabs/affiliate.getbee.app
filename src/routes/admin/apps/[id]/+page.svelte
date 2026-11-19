@@ -220,7 +220,12 @@
 	</div>
 
 	<div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-		<StatCard label="Active installs" value={String(s.activeInstalls)} icon={StoreIcon} />
+		<StatCard
+			label="Installs on paying stores"
+			value={String(s.paidInstalls)}
+			hint="{s.activeInstalls} live in all"
+			icon={StoreIcon}
+		/>
 		<StatCard
 			label="Churned"
 			value={String(s.churnedInstalls)}

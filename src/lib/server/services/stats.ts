@@ -15,6 +15,7 @@ import {
 	transactions,
 	users
 } from '$lib/server/db/schema';
+import { STORE_TYPES, storeTypeSql, type StoreType } from './shop-plan';
 
 const zero = (value: unknown) => Number(value ?? 0);
 
@@ -439,6 +440,8 @@ export type AppRevenueRow = {
 	netCents: number;
 	thisMonthGrossCents: number;
 	activeInstalls: number;
+	/** Live installs on shops that pay Shopify. Dev, trial and unknown plans are left out. */
+	paidInstalls: number;
 	totalInstalls: number;
 	churnedInstalls: number;
 	/** Shops Shopify closed or froze. Not churn, but not active either. */
@@ -478,6 +481,11 @@ export async function revenueByApp(
 			activeInstalls: sql<number>`(
 				select count(*) from installs i where i.app_id = apps.id and i.status = 'installed'
 			)`,
+			paidInstalls: sql<number>`(
+				select count(*) from installs i join merchants mm on mm.id = i.merchant_id
+				where i.app_id = apps.id and i.status = 'installed'
+					and ${storeTypeSql(sql.raw('mm.shopify_plan'))} = 'paid'
+			)`,
 			totalInstalls: sql<number>`(select count(*) from installs i where i.app_id = apps.id)`,
 			churnedInstalls: sql<number>`(
 				select count(*) from installs i where i.app_id = apps.id and i.status = 'uninstalled'
@@ -512,6 +520,7 @@ export async function revenueByApp(
 		netCents: zero(r.netCents),
 		thisMonthGrossCents: zero(r.thisMonthGrossCents),
 		activeInstalls: zero(r.activeInstalls),
+		paidInstalls: zero(r.paidInstalls),
 		totalInstalls: zero(r.totalInstalls),
 		churnedInstalls: zero(r.churnedInstalls),
 		closedInstalls: zero(r.closedInstalls),
@@ -755,6 +764,10 @@ export async function appLifecycleSeries(
 export type MerchantTotals = {
 	total: number;
 	activeInstalls: number;
+	/** Live installs on shops that pay Shopify. */
+	paidInstalls: number;
+	/** Live installs by what the shop pays Shopify. */
+	liveByStoreType: Record<StoreType, number>;
 	churnedInstalls: number;
 	closedInstalls: number;
 	newThisMonth: number;
@@ -776,13 +789,21 @@ export async function merchantTotals(
 		and ${scopeSql(scope, 'i.app_id')}
 	)`;
 
-	const [total, byStatus, recent, contactable] = await Promise.all([
+	const type = storeTypeSql(merchants.shopifyPlan);
+
+	const [total, byStatus, byStoreType, recent, contactable] = await Promise.all([
 		db.select({ value: count() }).from(merchants).where(ids === null ? undefined : scopedMerchants),
 		db
 			.select({ status: installs.status, value: count() })
 			.from(installs)
 			.where(installLimit)
 			.groupBy(installs.status),
+		db
+			.select({ type, value: count() })
+			.from(installs)
+			.innerJoin(merchants, eq(merchants.id, installs.merchantId))
+			.where(and(eq(installs.status, 'installed'), installLimit))
+			.groupBy(type),
 		db
 			.select({ value: count() })
 			.from(merchants)
@@ -802,10 +823,17 @@ export async function merchantTotals(
 	]);
 
 	const statuses = new Map(byStatus.map((r) => [r.status, zero(r.value)]));
+	const liveByStoreType = Object.fromEntries(STORE_TYPES.map((t) => [t, 0])) as Record<
+		StoreType,
+		number
+	>;
+	for (const row of byStoreType) liveByStoreType[row.type] = zero(row.value);
 
 	return {
 		total: zero(total[0]?.value),
 		activeInstalls: statuses.get('installed') ?? 0,
+		paidInstalls: liveByStoreType.paid,
+		liveByStoreType,
 		churnedInstalls: statuses.get('uninstalled') ?? 0,
 		closedInstalls: statuses.get('closed') ?? 0,
 		newThisMonth: zero(recent[0]?.value),

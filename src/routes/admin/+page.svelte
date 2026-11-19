@@ -127,11 +127,11 @@
 			hint="Gross, before Shopify's share"
 		/>
 		<StatCard
-			label="Live installs"
-			value={String(m.activeInstalls)}
+			label="Installs on paying stores"
+			value={String(m.paidInstalls)}
 			trend={installTrend}
-			trendLabel="{installsNet >= 0 ? '+' : ''}{installsNet} in 30 days"
-			hint="{m.churnedInstalls} uninstalled · {m.closedInstalls} stores closed"
+			trendLabel="{installsNet >= 0 ? '+' : ''}{installsNet} in 30 days, all stores"
+			hint="{m.activeInstalls} live in all · {m.churnedInstalls} uninstalled · {m.closedInstalls} stores closed"
 		/>
 		<StatCard
 			label="Merchants"
@@ -293,7 +293,9 @@
 						<Table.Header>
 							<Table.Row>
 								<Table.Head>App</Table.Head>
-								<Table.Head class="text-right">Installs</Table.Head>
+								<Table.Head class="text-right" title="Live installs on stores paying Shopify, out of all live installs">
+									Paying / live
+								</Table.Head>
 								<Table.Head class="text-right">Churned</Table.Head>
 								<Table.Head class="text-right">Closed</Table.Head>
 								<Table.Head class="text-right">MRR</Table.Head>
@@ -329,7 +331,10 @@
 											</div>
 										</div>
 									</Table.Cell>
-									<Table.Cell class="text-right tabular-nums">{app.activeInstalls}</Table.Cell>
+									<Table.Cell class="text-right tabular-nums">
+										{app.paidInstalls}
+										<span class="text-muted-foreground">/ {app.activeInstalls}</span>
+									</Table.Cell>
 									<Table.Cell class="text-right tabular-nums text-muted-foreground">
 										{app.churnedInstalls}
 									</Table.Cell>
@@ -365,7 +370,10 @@
 						<Table.Footer>
 							<Table.Row>
 								<Table.Cell class="font-medium">Total</Table.Cell>
-								<Table.Cell class="text-right tabular-nums">{m.activeInstalls}</Table.Cell>
+								<Table.Cell class="text-right tabular-nums">
+										{m.paidInstalls}
+										<span class="text-muted-foreground">/ {m.activeInstalls}</span>
+									</Table.Cell>
 								<Table.Cell class="text-right tabular-nums">{m.churnedInstalls}</Table.Cell>
 								<Table.Cell class="text-right tabular-nums">{m.closedInstalls}</Table.Cell>
 								<Table.Cell class="text-right tabular-nums">

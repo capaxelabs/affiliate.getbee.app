@@ -21,6 +21,23 @@
 	let search = $state(data.search);
 	let appId = $state(data.appId || 'all');
 	let status = $state(data.status || 'all');
+	let store = $state(data.store);
+
+	const STORE_LABEL: Record<string, string> = {
+		paid: 'Paying Shopify',
+		dev: 'Dev stores',
+		trial: 'On a trial',
+		inactive: 'Frozen or cancelled',
+		unknown: 'Plan unknown',
+		all: 'All stores'
+	};
+	const STORE_TAG: Record<string, string> = {
+		dev: 'Dev store',
+		trial: 'Trial',
+		inactive: 'Frozen or cancelled',
+		unknown: 'Plan unknown'
+	};
+	const live = $derived(data.totals.liveByStoreType);
 
 	const appLabel = $derived(
 		appId === 'all' ? 'All apps' : (data.apps.find((a) => a.id === appId)?.name ?? 'All apps')
@@ -32,7 +49,9 @@
 	function apply(next: Record<string, string>) {
 		const url = new URL(window.location.href);
 		for (const [key, value] of Object.entries(next)) {
-			if (value && value !== 'all') url.searchParams.set(key, value);
+			// The store filter defaults to paying stores, so `all` has to be spelled out.
+			const isDefault = key === 'store' ? value === 'paid' : value === 'all';
+			if (value && !isDefault) url.searchParams.set(key, value);
 			else url.searchParams.delete(key);
 		}
 		goto(url, { keepFocus: true, replaceState: true, noScroll: true });
@@ -48,8 +67,26 @@
 
 <svelte:head><title>Merchants · Admin</title></svelte:head>
 
-<PageHeader title="Merchants" description="Every shop that has installed one of your apps.">
+<PageHeader
+	title="Merchants"
+	description="Shops that installed one of your apps. Stores paying Shopify show first; switch the filter to see dev, trial and other stores."
+>
 	{#snippet actions()}
+		<Select.Root
+			type="single"
+			bind:value={store}
+			onValueChange={(v) => {
+				store = v;
+				apply({ store: v });
+			}}
+		>
+			<Select.Trigger class="w-44">{STORE_LABEL[store] ?? 'Paying Shopify'}</Select.Trigger>
+			<Select.Content>
+				{#each Object.entries(STORE_LABEL) as [value, label] (value)}
+					<Select.Item {value} {label}>{label}</Select.Item>
+				{/each}
+			</Select.Content>
+		</Select.Root>
 		<Select.Root
 			type="single"
 			bind:value={appId}
@@ -88,7 +125,13 @@
 <div class="space-y-5 px-5 pb-10 sm:px-8">
 	<div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
 		<StatCard label="Merchants" value={String(data.totals.total)} icon={UsersIcon} />
-		<StatCard label="Active installs" value={String(data.totals.activeInstalls)} icon={PlugIcon} />
+		<StatCard
+			label="Installs on paying stores"
+			value={String(data.totals.paidInstalls)}
+			hint="{data.totals.activeInstalls} live in all · {live.dev} dev · {live.trial} trial · {live.unknown +
+				live.inactive} plan unknown"
+			icon={PlugIcon}
+		/>
 		<StatCard label="Churned" value={String(data.totals.churnedInstalls)} icon={UnplugIcon} />
 		<StatCard label="New this month" value={String(data.totals.newThisMonth)} icon={StoreIcon} />
 		<StatCard
@@ -115,8 +158,8 @@
 		{#if data.installs.length === 0}
 			<EmptyState
 				icon={StoreIcon}
-				title="No merchants yet"
-				description="They appear as soon as your apps start posting installs to /api/track/install."
+				title="No stores match"
+				description="Try another store type, app or status. New shops appear once your apps post installs to /api/track/install."
 			/>
 		{:else}
 			<div class="overflow-x-auto">
@@ -140,6 +183,11 @@
 										{row.shopDomain}{row.country ? ` · ${row.country}` : ''}{row.shopifyPlan
 											? ` · ${row.shopifyPlan}`
 											: ''}
+										{#if STORE_TAG[row.storeType]}
+											<span class="ml-1 rounded border px-1 py-px text-[10px]">
+												{STORE_TAG[row.storeType]}
+											</span>
+										{/if}
 									</p>
 								</Table.Cell>
 								<Table.Cell class="text-muted-foreground">

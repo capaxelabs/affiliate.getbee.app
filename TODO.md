@@ -76,6 +76,19 @@ Three roles, one login (email magic-code):
 - [x] Admin overview: gross / net / this month / MoM, revenue-by-app table
 - [x] Apps page: installs, churn, this month and gross per app
 
+- [x] Count installs on stores that pay Shopify (2026-11-19). `shop-plan.ts` sorts
+      `merchants.shopify_plan` into paid, dev, trial, inactive or unknown. Merchants
+      defaults to paying stores; the dashboard, apps list and app page show paying
+      out of live. On the day: 66 paying of 138 live, 31 dev, 41 unknown.
+- [ ] ShootFlo sends "Regular" for every shop that is not Plus or a dev store, so
+      15 of its 40 live installs cannot be classed. Send `shop.plan.publicDisplayName`
+      from the app instead. Done when ShootFlo has no live install on "Regular".
+- [ ] Some apps send their own plan ("free", "pro") as the shop plan when the
+      Shopify plan is missing (`store.shopPlan ?? store.currentPlan` in Bee
+      Subscriptions). Send null instead. Done when no merchant has plan "free".
+- [ ] Insights and the install funnel still count every store. Decide whether
+      they move to paying stores once the unknown bucket is small.
+
 ## Merchant lifecycle email (moved to Raechly, 2026-09-29)
 
 Removed from this app: outbox, templates, per-app toggles, reply-to column, hourly
@@ -333,7 +346,10 @@ History of the removed feature:
       banners and coloured text have dark variants
 - [ ] Look over the admin and portal pages in dark and fix anything that
       reads badly; only the login page was checked
-- [ ] Add search terms and competitors on Integrations
+- [x] Search terms: 24 keywords added (3 per app), 2026-11-17
+- [ ] Check the 03:00 cron still finishes with 24 keywords: each one costs up
+      to 3 App Store fetches in the same request as the Partner sync
+- [ ] Add competitors on Integrations
 - [ ] Affiliate-facing funnel per referral link: clicks → installs → trial → paid
 
 ## Admin redesign (shadcn-svelte dashboard-01)

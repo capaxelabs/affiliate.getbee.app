@@ -186,7 +186,9 @@
 						<Table.Head>Affiliate</Table.Head>
 						<Table.Head>Commission</Table.Head>
 						<Table.Head>Status</Table.Head>
-						<Table.Head class="text-right">Installs</Table.Head>
+						<Table.Head class="text-right" title="Live installs on stores paying Shopify, out of all live installs">
+							Paying / live
+						</Table.Head>
 						<Table.Head class="text-right">This month</Table.Head>
 						<Table.Head class="text-right">Gross</Table.Head>
 						<Table.Head class="text-right">Referrals</Table.Head>
@@ -263,7 +265,8 @@
 							</Table.Cell>
 							<Table.Cell><StatusBadge status={app.status} /></Table.Cell>
 							<Table.Cell class="text-right tabular-nums">
-								{app.activeInstalls}
+								{app.paidInstalls}
+								<span class="text-muted-foreground">/ {app.activeInstalls}</span>
 								{#if app.churnedInstalls}
 									<span class="block text-xs text-muted-foreground">
 										{app.churnedInstalls} churned
