@@ -110,18 +110,15 @@ Three roles, one login (email magic-code):
         capaxe.com stores are excluded automatically; a store on a personal
         address still has to be added by hand. Now 88 live installs on 69
         stores, 52 paying installs on 46 stores, 208 merchants.
-- [ ] ShootFlo sends "Regular" for every shop that is not Plus or a dev store, so
-      16 of its 40 live installs cannot be classed. It already keeps Shopify's
-      plan in `stores.shopify_plan_name`; send that instead. Done when ShootFlo
-      has no live install on "Regular".
-- [ ] Some apps send their own plan ("free", "pro") as the shop plan when the
-      Shopify plan is missing (`store.shopPlan ?? store.currentPlan` in Bee
-      Subscriptions, `shopPlan ?? billingPlan` in Bee Secret Gift). Send null
-      instead. Done when no merchant has plan "free".
-- [ ] `plan.publicDisplayName` reports a dev store as "Basic" (Bee Secret Gift,
-      Bee AI SEO, ShootFlo read it), so a dev store can count as paying. Send
-      `plan.displayName` or check `plan.partnerDevelopment`. Only 27 of the 44
-      paying stores could be checked against an app database.
+- [x] Every Bee app now reports the store's Shopify plan: "Development" for a
+      partner dev store, otherwise `plan.publicDisplayName`, never the app's own
+      billing plan (2026-11-26). AI SEO, Subscriptions, Secret Gift and Migrate
+      deploy on push. ShootFlo deployed by hand. Invoice needed no change.
+- [ ] Deploy the plan fix where a push does not ship it: Reviews API (manual
+      "Deploy API to Hetzner"; main also carries 9 undeployed feature commits
+      and the 2026-11-19 run failed) and RankFlo (`fab build && fab deploy`).
+- [ ] Stores reported before the fix keep their old plan until a shop/update
+      or reinstall. 9 storefront-open stores were set to "Basic" as a guess.
 - [ ] Insights and the install funnel still count every store. Decide whether
       they move to paying stores once the unknown bucket is small.
 
