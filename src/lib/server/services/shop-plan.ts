@@ -24,7 +24,8 @@ const PLANS: Record<Exclude<StoreType, 'unknown'>, string[]> = {
 		'shopify plus',
 		'shopify_plus',
 		'starter',
-		'retail'
+		'retail',
+		'lite'
 	],
 	dev: [
 		'development',
@@ -33,10 +34,11 @@ const PLANS: Record<Exclude<StoreType, 'unknown'>, string[]> = {
 		'partner_test',
 		'plus_partner_sandbox',
 		'staff',
-		'staff_business'
+		'staff_business',
+		'staff business'
 	],
-	trial: ['trial', 'free trial', 'paid_trial', 'paid trial'],
-	inactive: ['frozen', 'cancelled', 'dormant', 'fraudulent', 'closed', 'paused']
+	trial: ['trial', 'free trial', 'paid_trial', 'paid trial', 'plus trial'],
+	inactive: ['frozen', 'cancelled', 'dormant', 'fraudulent', 'closed', 'paused', 'inactive']
 };
 
 /** Dev stores that simulate a plan report it as "Basic App Development". */

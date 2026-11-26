@@ -92,29 +92,24 @@ Three roles, one login (email magic-code):
       paying asked for a password or were unavailable and were left as paying
       on request: lekan-xqvfhkjc, si0hf1-82, zephryinewynterltd, bici-test,
       gm0nkw-tn. Now 74 paying installs on 53 stores, 19 stores unknown.
-- [ ] Overview audit (2026-11-26). Revenue, net, Shopify share, MRR, ARR,
-      affiliates and commissions match the raw rows. These do not:
-  - [ ] The Partner sync's batch path (`recordLifecycleHistory`) never checks
-        `hasNearbyEvent`, so an install the app reported first gets a second
-        "installed" event at the next 03:00 sync. 134 installed and 37
-        uninstalled duplicates; the 30-day "75 new" is really 40 and the 90-day
-        "255 installs" 162. 133 installs have an inflated `installCount`. Fix
-        the sync, delete the duplicates, rebuild the affected installs.
-  - [ ] Team test stores (capaxe.com emails and the owner's own Gmail) count as
-        merchants: 17 stores, 40 of 142 live installs, 19 of 74 paying installs
-        (the-bee-store-3, bee-test-store-2, foxsell-bundles-plus, gift-aa3eghc3).
-        Matched by email only, so confirm the list first. With them and the 14
-        unavailable stores out: 88 live installs on 69 stores, 52 paying
-        installs on 46 stores, 208 merchants.
-  - [ ] "No prior month to compare" shows when last month made $0. Say "$0 last
-        month" instead.
-- [ ] 14 stores with a live install show Shopify's "This store is unavailable"
-      page (HTTP 423, closed, frozen or paused), so "live" is overstated:
-      dwxmsy-v0, indian-store-btyczgbi, 0qpkh0-by, 1ah68k-ur, 1ptb0y-xt,
-      7t9npe-wm, czdyuy-cr, hz13an-1n, t4m9kj-bx, tfs0m1-rp, yvgrnb-xk,
-      gm0nkw-tn, rb8bx0-m5, 02imw0-bn. Shopify sent no RelationshipDeactivated
-      for any of them, so the sync has nothing to act on. A daily storefront
-      check (HTTP 423) or a frozen charge event could close them.
+- [x] Overview audit (2026-11-26). Revenue, net, Shopify share, MRR, ARR,
+      affiliates and commissions matched the raw rows. Fixed the rest:
+  - [x] Two of the same lifecycle event in a row now count once
+        (`repeatsNeighbour` in merchant.ts), on the app's report and the
+        Partner sync alike. Deleted 189 duplicate events (152 late app
+        installs, 37 Partner uninstalls) and recounted 153 installs. New
+        installs, last 30 days: 75 became 40.
+  - [x] Daily storefront check (`services/storefront.ts`, run by the cron)
+        closes installs on stores answering HTTP 423 "This store is
+        unavailable" and reopens them when they return. Closed the first 14
+        by hand on 2026-11-26, so today's chart shows 14 closures at once.
+  - [x] "$0 last month" replaces "No prior month to compare"; the paying card
+        also shows paying stores.
+  - [x] Removed the 17 team test stores (owner email at capaxe.com or the
+        owner's Gmail) and added them to `internal_shops` (2026-11-26). New
+        capaxe.com stores are excluded automatically; a store on a personal
+        address still has to be added by hand. Now 88 live installs on 69
+        stores, 52 paying installs on 46 stores, 208 merchants.
 - [ ] ShootFlo sends "Regular" for every shop that is not Plus or a dev store, so
       16 of its 40 live installs cannot be classed. It already keeps Shopify's
       plan in `stores.shopify_plan_name`; send that instead. Done when ShootFlo
