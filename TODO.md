@@ -80,12 +80,53 @@ Three roles, one login (email magic-code):
       `merchants.shopify_plan` into paid, dev, trial, inactive or unknown. Merchants
       defaults to paying stores; the dashboard, apps list and app page show paying
       out of live. On the day: 66 paying of 138 live, 31 dev, 41 unknown.
+- [x] An unrecognised plan ("free", "pro", "Regular") no longer replaces a known
+      one in `upsertMerchant` (2026-11-26). Bee Subscriptions had turned Vintage
+      Sangini's "basic" into "free" that morning. Live once pushed.
+- [x] Fixed 6 merchant plans in production from the apps' own databases
+      (2026-11-26): Vintage Sangini to basic, flora and four other dev stores to
+      their dev plan. Now 65 paying installs on 44 stores, 28 stores unknown.
+- [x] Checked storefronts of the 45 live stores with no confirmed plan (2026-11-26).
+      9 stores on "free", "Regular" or blank opened without a password and were
+      set to "Basic" (a guess: the real plan is unknown). 5 stores counted as
+      paying asked for a password or were unavailable and were left as paying
+      on request: lekan-xqvfhkjc, si0hf1-82, zephryinewynterltd, bici-test,
+      gm0nkw-tn. Now 74 paying installs on 53 stores, 19 stores unknown.
+- [ ] Overview audit (2026-11-26). Revenue, net, Shopify share, MRR, ARR,
+      affiliates and commissions match the raw rows. These do not:
+  - [ ] The Partner sync's batch path (`recordLifecycleHistory`) never checks
+        `hasNearbyEvent`, so an install the app reported first gets a second
+        "installed" event at the next 03:00 sync. 134 installed and 37
+        uninstalled duplicates; the 30-day "75 new" is really 40 and the 90-day
+        "255 installs" 162. 133 installs have an inflated `installCount`. Fix
+        the sync, delete the duplicates, rebuild the affected installs.
+  - [ ] Team test stores (capaxe.com emails and the owner's own Gmail) count as
+        merchants: 17 stores, 40 of 142 live installs, 19 of 74 paying installs
+        (the-bee-store-3, bee-test-store-2, foxsell-bundles-plus, gift-aa3eghc3).
+        Matched by email only, so confirm the list first. With them and the 14
+        unavailable stores out: 88 live installs on 69 stores, 52 paying
+        installs on 46 stores, 208 merchants.
+  - [ ] "No prior month to compare" shows when last month made $0. Say "$0 last
+        month" instead.
+- [ ] 14 stores with a live install show Shopify's "This store is unavailable"
+      page (HTTP 423, closed, frozen or paused), so "live" is overstated:
+      dwxmsy-v0, indian-store-btyczgbi, 0qpkh0-by, 1ah68k-ur, 1ptb0y-xt,
+      7t9npe-wm, czdyuy-cr, hz13an-1n, t4m9kj-bx, tfs0m1-rp, yvgrnb-xk,
+      gm0nkw-tn, rb8bx0-m5, 02imw0-bn. Shopify sent no RelationshipDeactivated
+      for any of them, so the sync has nothing to act on. A daily storefront
+      check (HTTP 423) or a frozen charge event could close them.
 - [ ] ShootFlo sends "Regular" for every shop that is not Plus or a dev store, so
-      15 of its 40 live installs cannot be classed. Send `shop.plan.publicDisplayName`
-      from the app instead. Done when ShootFlo has no live install on "Regular".
+      16 of its 40 live installs cannot be classed. It already keeps Shopify's
+      plan in `stores.shopify_plan_name`; send that instead. Done when ShootFlo
+      has no live install on "Regular".
 - [ ] Some apps send their own plan ("free", "pro") as the shop plan when the
       Shopify plan is missing (`store.shopPlan ?? store.currentPlan` in Bee
-      Subscriptions). Send null instead. Done when no merchant has plan "free".
+      Subscriptions, `shopPlan ?? billingPlan` in Bee Secret Gift). Send null
+      instead. Done when no merchant has plan "free".
+- [ ] `plan.publicDisplayName` reports a dev store as "Basic" (Bee Secret Gift,
+      Bee AI SEO, ShootFlo read it), so a dev store can count as paying. Send
+      `plan.displayName` or check `plan.partnerDevelopment`. Only 27 of the 44
+      paying stores could be checked against an app database.
 - [ ] Insights and the install funnel still count every store. Decide whether
       they move to paying stores once the unknown bucket is small.
 

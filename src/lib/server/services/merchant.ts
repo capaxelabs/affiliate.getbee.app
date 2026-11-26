@@ -3,6 +3,7 @@ import type { DrizzleClient } from '$lib/server/db';
 import { apps, installEvents, installs, merchants } from '$lib/server/db/schema';
 import { normalizeShopDomain } from './referral';
 import { isInternalShop } from './internal-shops';
+import { storeType } from './shop-plan';
 
 export type MerchantProfile = {
 	shopDomain: string;
@@ -88,6 +89,17 @@ export async function upsertMerchant(
 	}
 	if (profile.email) patch.email = profile.email.toLowerCase();
 
+	// Several apps send their own plan ("free", "pro") or a vague "Regular" here.
+	// Plans are last-writer-wins across apps, so without this one of those
+	// replaces a real "Basic" and the shop drops out of the paying count.
+	if (
+		patch.shopifyPlan !== undefined &&
+		storeType(patch.shopifyPlan as string) === 'unknown' &&
+		storeType(existing.shopifyPlan) !== 'unknown'
+	) {
+		delete patch.shopifyPlan;
+	}
+
 	const [updated] = await db
 		.update(merchants)
 		.set(patch)
@@ -111,7 +123,7 @@ export async function upsertMerchant(
  * So the events are the truth and the row is derived. Writing the same event
  * twice is a no-op, and the outcome does not depend on arrival order.
  */
-async function applyLifecycleEvent(
+export async function applyLifecycleEvent(
 	db: DrizzleClient,
 	options: {
 		installId: string;
@@ -119,7 +131,7 @@ async function applyLifecycleEvent(
 		merchantId: string;
 		type: 'installed' | 'uninstalled' | 'deactivated' | 'feedback' | 'plan_changed';
 		occurredAt: Date;
-		source: 'ingest' | 'partner_api' | 'manual';
+		source: 'ingest' | 'partner_api' | 'manual' | 'storefront';
 		metadata?: Record<string, unknown> | null;
 	}
 ) {
@@ -193,38 +205,37 @@ async function rebuildInstallState(db: DrizzleClient, installId: string) {
 }
 
 
-/**
- * True when a state event of this kind is already recorded within a few minutes.
- *
- * The Partner API timestamps an install when Shopify saw it; an app's own webhook
- * timestamps it when OAuth finished, seconds or minutes later. Exact-timestamp
- * dedup would keep both and double the install count for any app reporting from
- * both sources. Only the single-event path needs this — the Partner sync's batch
- * path is single-source and cannot collide with itself.
- */
-async function hasNearbyEvent(
-	db: DrizzleClient,
-	installId: string,
-	type: 'installed' | 'uninstalled',
-	occurredAt: Date,
-	toleranceMinutes = 10
-) {
-	const window = toleranceMinutes * 60;
-	const at = Math.floor(occurredAt.getTime() / 1000);
+type StateEventRow = { type: string; occurredAt: Date };
 
-	const [near] = await db
-		.select({ id: installEvents.id })
+async function loadStateEvents(db: DrizzleClient, installId: string): Promise<StateEventRow[]> {
+	return db
+		.select({ type: installEvents.type, occurredAt: installEvents.occurredAt })
 		.from(installEvents)
-		.where(
-			and(
-				eq(installEvents.installId, installId),
-				eq(installEvents.type, type),
-				sql`abs(${installEvents.occurredAt} - ${at}) <= ${window}`
-			)
-		)
-		.limit(1);
+		.where(and(eq(installEvents.installId, installId), inArray(installEvents.type, [...STATE_EVENTS])));
+}
 
-	return Boolean(near);
+/**
+ * True when the state event just before or just after `at` is already `type`.
+ *
+ * Every install is reported twice: by the app when it happens, and by the
+ * Partner sync the next night with Shopify's own, slightly earlier clock. An
+ * app that reports late (a failed first try, a re-auth) can be hours or days
+ * off, so a time window misses it. Two installs in a row with nothing between
+ * them are one install, however far apart.
+ */
+export function repeatsNeighbour(events: StateEventRow[], type: string, at: Date): boolean {
+	const t = at.getTime();
+	let before: StateEventRow | undefined;
+	let after: StateEventRow | undefined;
+	for (const event of events) {
+		const et = event.occurredAt.getTime();
+		if (et <= t) {
+			if (!before || et >= before.occurredAt.getTime()) before = event;
+		} else if (!after || et < after.occurredAt.getTime()) {
+			after = event;
+		}
+	}
+	return before?.type === type || after?.type === type;
 }
 
 export type RecordInstallResult = {
@@ -293,10 +304,11 @@ export async function recordInstall(
 	// Closed counts as gone too, so a shop that re-opens gets its welcome.
 	const wasUninstalled = Boolean(existing && existing.status !== 'installed');
 
-	// The Partner sync may already have this install under a slightly different
-	// clock; recording it again would double the count.
+	// The Partner sync may already have this install under a different clock;
+	// recording it again would double the count.
 	const duplicate =
-		!firstInstall && (await hasNearbyEvent(db, installId, 'installed', installedAt));
+		!firstInstall &&
+		repeatsNeighbour(await loadStateEvents(db, installId), 'installed', installedAt);
 
 	const recorded = duplicate
 		? false
@@ -380,7 +392,11 @@ export async function recordUninstall(
 		await db.update(installs).set(reasonPatch).where(eq(installs.id, row.install.id));
 	}
 
-	const duplicateOff = await hasNearbyEvent(db, row.install.id, 'uninstalled', uninstalledAt);
+	const duplicateOff = repeatsNeighbour(
+		await loadStateEvents(db, row.install.id),
+		'uninstalled',
+		uninstalledAt
+	);
 
 	const recorded = duplicateOff
 		? false
@@ -475,7 +491,18 @@ export async function recordLifecycleHistory(
 		installId = created.id;
 	}
 
-	const rows = ordered.map((event) => ({
+	// The app usually reported these first. One read per shop, then compare in
+	// memory, so the cost still scales with shops rather than events.
+	const known = existing ? await loadStateEvents(db, installId) : [];
+	const fresh = ordered.filter((event) => {
+		const t = event.occurredAt.getTime();
+		const same = known.some((k) => k.type === event.type && k.occurredAt.getTime() === t);
+		if (same || repeatsNeighbour(known, event.type, event.occurredAt)) return false;
+		known.push({ type: event.type, occurredAt: event.occurredAt });
+		return true;
+	});
+
+	const rows = fresh.map((event) => ({
 		installId,
 		appId: options.appId,
 		merchantId: merchant.id,

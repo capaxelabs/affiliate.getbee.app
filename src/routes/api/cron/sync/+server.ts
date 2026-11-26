@@ -5,6 +5,7 @@ import { getIngestKey } from '$lib/server/services/ingest-key';
 import { syncAllReviews } from '$lib/server/services/reviews';
 import { syncListingTraffic } from '$lib/server/services/bigquery';
 import { snapshotListings, trackKeywords } from '$lib/server/services/appstore';
+import { checkStorefronts } from '$lib/server/services/storefront';
 import type { RequestHandler } from './$types';
 
 /**
@@ -42,9 +43,13 @@ export const POST: RequestHandler = async ({ request, locals, platform }) => {
 	const traffic = await syncListingTraffic(locals.db).catch((e) => ({ error: String(e) }));
 	const ranks = await trackKeywords(locals.db).catch((e) => ({ error: String(e) }));
 	const listings = await snapshotListings(locals.db).catch((e) => ({ error: String(e) }));
+	const storefronts = await checkStorefronts(locals.db).catch((e) => ({ error: String(e) }));
 
 	const failed = [...result.apps, ...result.installs, ...result.transactions].some(
 		(r) => r.status === 'failed'
 	);
-	return json({ task, ...result, reviews, traffic, ranks, listings }, { status: failed ? 502 : 200 });
+	return json(
+		{ task, ...result, reviews, traffic, ranks, listings, storefronts },
+		{ status: failed ? 502 : 200 }
+	);
 };

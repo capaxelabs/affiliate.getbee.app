@@ -273,7 +273,7 @@ export const installEvents = sqliteTable(
 		type: text('type', {
 			enum: ['installed', 'uninstalled', 'deactivated', 'plan_changed', 'feedback']
 		}).notNull(),
-		source: text('source', { enum: ['ingest', 'partner_api', 'manual'] })
+		source: text('source', { enum: ['ingest', 'partner_api', 'manual', 'storefront'] })
 			.notNull()
 			.default('ingest'),
 		metadata: text('metadata', { mode: 'json' }).$type<Record<string, unknown>>(),

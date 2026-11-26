@@ -766,6 +766,8 @@ export type MerchantTotals = {
 	activeInstalls: number;
 	/** Live installs on shops that pay Shopify. */
 	paidInstalls: number;
+	/** Shops that pay Shopify with at least one live install. */
+	paidStores: number;
 	/** Live installs by what the shop pays Shopify. */
 	liveByStoreType: Record<StoreType, number>;
 	churnedInstalls: number;
@@ -791,7 +793,7 @@ export async function merchantTotals(
 
 	const type = storeTypeSql(merchants.shopifyPlan);
 
-	const [total, byStatus, byStoreType, recent, contactable] = await Promise.all([
+	const [total, byStatus, byStoreType, paidStores, recent, contactable] = await Promise.all([
 		db.select({ value: count() }).from(merchants).where(ids === null ? undefined : scopedMerchants),
 		db
 			.select({ status: installs.status, value: count() })
@@ -804,6 +806,11 @@ export async function merchantTotals(
 			.innerJoin(merchants, eq(merchants.id, installs.merchantId))
 			.where(and(eq(installs.status, 'installed'), installLimit))
 			.groupBy(type),
+		db
+			.select({ value: sql<number>`count(distinct ${installs.merchantId})` })
+			.from(installs)
+			.innerJoin(merchants, eq(merchants.id, installs.merchantId))
+			.where(and(eq(installs.status, 'installed'), sql`${type} = 'paid'`, installLimit)),
 		db
 			.select({ value: count() })
 			.from(merchants)
@@ -833,6 +840,7 @@ export async function merchantTotals(
 		total: zero(total[0]?.value),
 		activeInstalls: statuses.get('installed') ?? 0,
 		paidInstalls: liveByStoreType.paid,
+		paidStores: zero(paidStores[0]?.value),
 		liveByStoreType,
 		churnedInstalls: statuses.get('uninstalled') ?? 0,
 		closedInstalls: statuses.get('closed') ?? 0,

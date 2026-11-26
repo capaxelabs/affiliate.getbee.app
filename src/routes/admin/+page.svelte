@@ -29,7 +29,7 @@
 
 	const momLabel = $derived(
 		momChange === null
-			? 'No prior month to compare'
+			? '$0 last month'
 			: `${momChange >= 0 ? '+' : ''}${momChange.toFixed(0)}% vs last month`
 	);
 
@@ -131,7 +131,7 @@
 			value={String(m.paidInstalls)}
 			trend={installTrend}
 			trendLabel="{installsNet >= 0 ? '+' : ''}{installsNet} in 30 days, all stores"
-			hint="{m.activeInstalls} live in all · {m.churnedInstalls} uninstalled · {m.closedInstalls} stores closed"
+			hint="{plural(m.paidStores, 'paying store')} · {m.activeInstalls} live in all · {m.churnedInstalls} uninstalled · {m.closedInstalls} closed"
 		/>
 		<StatCard
 			label="Merchants"

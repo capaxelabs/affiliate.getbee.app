@@ -15,6 +15,9 @@ const INTERNAL_DOMAIN = /^(app-review-|redacted\.)/;
 /** The address Shopify's reviewers sign their stores up with. */
 const INTERNAL_EMAIL = /@shopify\.com$/i;
 
+/** Our own team's test stores. They are not merchants and must not count as ones. */
+const TEAM_EMAIL = /@capaxe\.com$/i;
+
 export function isInternalDomain(shopDomain: string): boolean {
 	return INTERNAL_DOMAIN.test(shopDomain);
 }
@@ -77,6 +80,10 @@ export async function isInternalShop(
 	// answering, so tonight's Partner sync cannot bring it back.
 	if (isInternalEmail(options.email)) {
 		await markInternalShop(db, shopDomain, 'app_review', `email ${options.email}`);
+		return true;
+	}
+	if (options.email && TEAM_EMAIL.test(options.email.trim())) {
+		await markInternalShop(db, shopDomain, 'manual', `team store, email ${options.email}`);
 		return true;
 	}
 
